@@ -45,6 +45,41 @@ void afficher_etat_jeu(const int board[12], const int points[2], int current_pla
    printf("Joueur courant : %d\n", current_player);
 }
 
+void demarrer_partie(int board[12], int points[2])
+{
+   int i = 0;
+   for(i = 0; i < 12; i++)
+   {
+      board[i] = 4;
+   }
+   points[0] = 0;
+   points[1] = 0;
+}
+
+bool traiter_coup(int board[12], int points[2], int current_player, int pit)
+{
+   return make_move(board, points, current_player, pit);
+}
+
+void envoyer_etat_jeu(SOCKET sock, const int board[12], const int points[2], int current_player)
+{
+   char buffer[BUF_SIZE];
+   snprintf(buffer, BUF_SIZE, "Plateau :\n\n");
+   for(int i = 11; i >= 6; i--)
+   {
+      snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "%d  | ", board[i]);
+   }
+   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "\n");
+   for(int i = 0; i < 6; i++)
+   {
+      snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "%d  | ", board[i]);
+   }
+   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "\n\nPoints : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
+   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "Joueur courant : %d\n", current_player);
+
+   write_client(sock, buffer);
+}
+
 static void app(void)
 {
    SOCKET sock = init_connection();
@@ -75,6 +110,11 @@ static void app(void)
    */
 
    fd_set rdfs;
+
+   int board[12];
+   int points[2];
+   int current_player;
+   bool coup_valide = true;
 
    while(1)
    {
@@ -129,8 +169,20 @@ static void app(void)
 
          FD_SET(csock, &rdfs);
 
-         Client c = { csock };
-         strncpy(c.name, buffer, BUF_SIZE - 1);
+         // si on a déjà deux clients connectés, on refuse la connexion
+         if (actual >= 2)
+         {
+            /* Refuser ou fermer la connexion : la partie a déjà deux joueurs. */
+            closesocket(csock);
+            continue;
+         }
+
+         // on ajoute le nouveau client à la liste des clients avec son nom et son numéro de joueur
+         Client c = {0};
+         c.sock = csock;
+         c.player = actual + 1;  /* premier client = 1, deuxième = 2 */
+         snprintf(c.name, sizeof c.name, "%s", buffer);
+
          clients[actual] = c;
          actual++;
       }
@@ -155,11 +207,47 @@ static void app(void)
                }
                else
                {
-                  send_message_to_all_clients(clients, client, actual, buffer, 0);
+                  if(strncmp(buffer, "START", 5) == 0){
+                     demarrer_partie(board, points);
+                     current_player = 1;
+                     snprintf(buffer, BUF_SIZE, "Nouvelle partie démarrée !");
+
+                     //boucle pour envoyer a tous les clients mais il faudra changer pour envoyer qu'aux deux clients connecté sur le jeu
+                     for(int j = 0; j < actual; j++){
+                        envoyer_etat_jeu(clients[j].sock, board, points, current_player);
+                     }
+      
+                  }
+                  else if (strncmp(buffer, "MOVE", 4) == 0){
+                     //si ce n'est pas le bon jouruer qui joue, on ignore le coup
+                     if (client.player != current_player) continue;
+
+                     //si le coup est invalide, on envoie un message d'erreur au client et on ignore le coup
+                     coup_valide = traiter_coup(board, points, current_player, atoi(buffer + 5));
+                     if (!coup_valide){
+                        snprintf(buffer, BUF_SIZE, "Coup invalide !");
+                        continue;
+                     }
+                     
+                     //boucle pour envoyer a tous les clients mais il faudra changer pour envoyer qu'aux deux clients connecté sur le jeu
+                     for(int j = 0; j < actual; j++){
+                        envoyer_etat_jeu(clients[j].sock, board, points, current_player);
+                     }
+
+                     current_player = current_player == 1 ? 2 : 1;
+                  }
+                  else if (strcmp(buffer, "SEND")== 0){
+                     send_message_to_all_clients(clients, client, actual, buffer, 0);
+                  }
+                  else {
+                     snprintf(buffer, BUF_SIZE, "Commande inconnue !");
+                  }
                }
                break;
             }
          }
+
+
       }
    }
 
