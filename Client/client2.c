@@ -6,39 +6,39 @@
 
 #include "client2.h"
 
-void client_afficher_etat_jeu(const int board[12], const int points[2], int current_player)
-{
-   int i = 0;
+// void client_afficher_etat_jeu(const int board[12], const int points[2], int current_player, char* username)
+// {
+//    int i = 0;
 
-   printf("\nPlateau :\n");
-   printf("Joueur 2 : ");
-   for(i = 11; i >= 6; i--)
-   {
-      printf("%2d ", board[i]);
-   }
-   printf("\n            ");
-   for(i = 6; i >= 1; i--)
-   {
-      printf("%2d ", i);
-   }
+//    printf("\nPlateau :\n");
+//    printf("Joueur 2 : ");
+//    for(i = 11; i >= 6; i--)
+//    {
+//       printf("%2d ", board[i]);
+//    }
+//    printf("\n            ");
+//    for(i = 6; i >= 1; i--)
+//    {
+//       printf("%2d ", i);
+//    }
 
-   printf("\nJoueur 1 : ");
-   for(i = 0; i < 6; i++)
-   {
-      printf("%2d ", board[i]);
-   }
-   printf("\n            ");
-   for(i = 1; i <= 6; i++)
-   {
-      printf("%2d ", i);
-   }
+//    printf("\nJoueur 1 : ");
+//    for(i = 0; i < 6; i++)
+//    {
+//       printf("%2d ", board[i]);
+//    }
+//    printf("\n            ");
+//    for(i = 1; i <= 6; i++)
+//    {
+//       printf("%2d ", i);
+//    }
 
-   printf("\n\nScores : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
-   if(current_player == 1 || current_player == 2)
-   {
-      printf("Au tour du joueur %d.\n", current_player);
-   }
-}
+//    printf("\n\nScores : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
+//    if(current_player == 1 || current_player == 2)
+//    {
+//       printf("Au tour du joueur %s.\n", username);
+//    }
+// }
 
 int client_demander_coup(void)
 {

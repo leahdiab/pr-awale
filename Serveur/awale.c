@@ -106,11 +106,6 @@ bool verif_end_game(int board[12], int points[2], int current_player)
    int own_has_seeds = 0;
    int i = 0;
 
-   if(current_player < 1 || current_player > 2)
-   {
-      return false;
-   }
-
    own_first_pit = current_player == 1 ? 0 : 6;
    opponent_first_pit = current_player == 1 ? 6 : 0;
 

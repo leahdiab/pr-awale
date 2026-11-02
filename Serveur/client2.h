@@ -2,12 +2,14 @@
 #define CLIENT_H
 
 #include "server2.h"
+#include <stdbool.h>
 
 typedef struct
 {
    SOCKET sock;
    char name[BUF_SIZE];
-   int player; /* 1 ou 2*/
+   bool available;
+   char invited_by[BUF_SIZE];
 }Client;
 
 #endif /* guard */

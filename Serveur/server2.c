@@ -27,23 +27,23 @@ static void end(void)
 #endif
 }
 
-void afficher_etat_jeu(const int board[12], const int points[2], int current_player)
-{
-   int i = 0;
+// void afficher_etat_jeu(const int board[12], const int points[2], int current_player)
+// {
+//    int i = 0;
 
-   printf("Plateau :\n\n");
-   for(i = 11; i >= 6; i--)
-   {
-      printf("%d  | ", board[i]);
-   }
-   printf("\n");
-   for(i = 0; i < 6; i++)
-   {
-      printf("%d  | ", board[i]);
-   }
-   printf("\n\nPoints : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
-   printf("Joueur courant : %d\n", current_player);
-}
+//    printf("Plateau :\n\n");
+//    for(i = 11; i >= 6; i--)
+//    {
+//       printf("%d  | ", board[i]);
+//    }
+//    printf("\n");
+//    for(i = 0; i < 6; i++)
+//    {
+//       printf("%d  | ", board[i]);
+//    }
+//    printf("\n\nPoints : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
+//    printf("Joueur courant : %d\n", current_player);
+// }
 
 void demarrer_partie(int board[12], int points[2])
 {
@@ -61,7 +61,7 @@ bool traiter_coup(int board[12], int points[2], int current_player, int pit)
    return make_move(board, points, current_player, pit);
 }
 
-void envoyer_etat_jeu(SOCKET sock, const int board[12], const int points[2], int current_player)
+void envoyer_etat_jeu(SOCKET sock, const int board[12], const int points[2], const char* username)
 {
    char buffer[BUF_SIZE];
    snprintf(buffer, BUF_SIZE, "Plateau :\n\n");
@@ -75,10 +75,108 @@ void envoyer_etat_jeu(SOCKET sock, const int board[12], const int points[2], int
       snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "%d  | ", board[i]);
    }
    snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "\n\nPoints : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
-   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "Joueur courant : %d\n", current_player);
+   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "Joueur courant : %s\n", username);
 
    write_client(sock, buffer);
 }
+
+static int trouver_client_par_pseudo(Client *clients, int actual, const char *username)
+{
+   for(int i = 0; i < actual; i++)
+   {
+      if(strcmp(clients[i].name, username) == 0)
+      {
+         return i;
+      }
+   }
+
+   return -1;
+}
+
+static int trouver_partie_par_socket(Game *games, SOCKET sock)
+{
+   for(int i = 0; i < MAX_CLIENTS / 2; i++)
+   {
+      if(games[i].active &&
+         (games[i].player1.sock == sock || games[i].player2.sock == sock))
+      {
+         return i;
+      }
+   }
+
+   return -1;
+}
+
+static void envoyer_liste_joueurs(Client *clients, int actual, SOCKET requester)
+{
+   char message[BUF_SIZE] = "Joueurs disponibles :";
+   int count = 0;
+
+   for(int i = 0; i < actual; i++)
+   {
+      if(clients[i].available && clients[i].sock != requester)
+      {
+         size_t used = strlen(message);
+         int written = snprintf(message + used, sizeof message - used, "\n%s", clients[i].name);
+         if(written < 0 || (size_t)written >= sizeof message - used)
+         {
+            break;
+         }
+         count++;
+      }
+   }
+
+   if(count == 0)
+   {
+      strncat(message, "\nAucun joueur disponible.", sizeof message - strlen(message) - 1);
+   }
+   else
+   {
+      strncat(message, "\nPour inviter un joueur : INVITE pseudo",
+              sizeof message - strlen(message) - 1);
+   }
+
+   write_client(requester, message);
+}
+
+static void envoyer_etat_partie(const Game *game)
+{
+   const char *username = game->current_player == 1
+      ? game->player1.name : game->player2.name;
+
+   envoyer_etat_jeu(game->player1.sock, game->board, game->points, username);
+   envoyer_etat_jeu(game->player2.sock, game->board, game->points, username);
+}
+
+static int trouver_partie_libre(Game *games)
+{
+   for(int i = 0; i < MAX_CLIENTS / 2; i++)
+   {
+      if(!games[i].active)
+      {
+         return i;
+      }
+   }
+
+   return -1;
+}
+
+static void terminer_partie(Game *game, Client *clients, int actual, const char *message)
+{
+   for(int i = 0; i < actual; i++)
+   {
+      if(clients[i].sock == game->player1.sock ||
+         clients[i].sock == game->player2.sock)
+      {
+         clients[i].available = true;
+         clients[i].invited_by[0] = '\0';
+         write_client(clients[i].sock, message);
+      }
+   }
+
+   game->active = false;
+}
+
 
 static void app(void)
 {
@@ -88,33 +186,11 @@ static void app(void)
    int actual = 0;
    int max = sock;
    /* an array for all clients */
-   Client clients[MAX_CLIENTS];
-
-   /*
-   int board[12] = {4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4};
-   int points[2] = {0, 0};
-   int famine_board[12] = {1};
-   int famine_points[2] = {0, 0};
-
-   printf("Test local des fonctions Awalé\n");
-   awale_afficher_etat_jeu(board, points, 1);
-   // make_move(board, points, 1, 1);
-   // awale_afficher_etat_jeu(board, points, 2);
-   // if(verif_end_game(board, points, 2)) {
-   //    printf("Test terminé : la partie peut continuer.\n");
-   // }
-   // printf("Test de fin par famine :\n");
-   // if(!verif_end_game(famine_board, famine_points, 1)) {
-   //    awale_afficher_etat_jeu(famine_board, famine_points, 1);
-   // }
-   */
+   Client clients[MAX_CLIENTS] = {0};
+   Game games[MAX_CLIENTS / 2] = {0};
+   int next_game_id = 1;
 
    fd_set rdfs;
-
-   int board[12];
-   int points[2];
-   int current_player;
-   bool coup_valide = true;
 
    while(1)
    {
@@ -149,7 +225,11 @@ static void app(void)
       {
          /* new client */
          SOCKADDR_IN csin = { 0 };
-         size_t sinsize = sizeof csin;
+#ifdef WIN32
+         int sinsize = sizeof csin;
+#else
+         socklen_t sinsize = sizeof csin;
+#endif
          int csock = accept(sock, (SOCKADDR *)&csin, &sinsize);
          if(csock == SOCKET_ERROR)
          {
@@ -158,32 +238,31 @@ static void app(void)
          }
 
          /* after connecting the client sends its name */
-         if(read_client(csock, buffer) == -1)
+         if(read_client(csock, buffer) <= 0)
          {
-            /* disconnected */
+            closesocket(csock);
+            continue;
+         }
+
+         buffer[strcspn(buffer, "\r\n")] = '\0';
+         if(actual >= MAX_CLIENTS || buffer[0] == '\0' ||
+            trouver_client_par_pseudo(clients, actual, buffer) >= 0)
+         {
+            write_client(csock, "Connexion refusee : pseudo invalide ou deja utilisé.");
+            closesocket(csock);
             continue;
          }
 
          /* what is the new maximum fd ? */
          max = csock > max ? csock : max;
 
-         FD_SET(csock, &rdfs);
-
-         // si on a déjà deux clients connectés, on refuse la connexion
-         if (actual >= 2)
-         {
-            /* Refuser ou fermer la connexion : la partie a déjà deux joueurs. */
-            closesocket(csock);
-            continue;
-         }
-
-         // on ajoute le nouveau client à la liste des clients avec son nom et son numéro de joueur
          Client c = {0};
          c.sock = csock;
-         c.player = actual + 1;  /* premier client = 1, deuxième = 2 */
+         c.available = true;
          snprintf(c.name, sizeof c.name, "%s", buffer);
 
          clients[actual] = c;
+         write_client(csock, "Connecte. Envoyez LIST pour voir les joueurs disponibles.");
          actual++;
       }
       else
@@ -199,48 +278,209 @@ static void app(void)
                /* client disconnected */
                if(c == 0)
                {
+                  for(int g = 0; g < MAX_CLIENTS / 2; g++)
+                  {
+                     if(games[g].active &&
+                        (games[g].player1.sock == client.sock ||
+                         games[g].player2.sock == client.sock))
+                     {
+                        SOCKET other_sock = games[g].player1.sock == client.sock
+                           ? games[g].player2.sock : games[g].player1.sock;
+                        for(int k = 0; k < actual; k++)
+                        {
+                           if(clients[k].sock == other_sock)
+                           {
+                              clients[k].available = true;
+                              write_client(other_sock, "Votre adversaire s'est deconnecte. Vous etes disponible.");
+                              break;
+                           }
+                        }
+                        games[g].active = false;
+                     }
+                  }
+                  if(client.invited_by[0] != '\0')
+                  {
+                     int inviter = trouver_client_par_pseudo(clients, actual, client.invited_by);
+                     if(inviter >= 0)
+                     {
+                        clients[inviter].available = true;
+                        write_client(clients[inviter].sock, "Invitation annulee : le joueur s'est deconnecte.");
+                     }
+                  }
+                  for(int k = 0; k < actual; k++)
+                  {
+                     if(strcmp(clients[k].invited_by, client.name) == 0)
+                     {
+                        clients[k].invited_by[0] = '\0';
+                        clients[k].available = true;
+                        write_client(clients[k].sock, "Invitation annulee : le joueur s'est deconnecte.");
+                     }
+                  }
                   closesocket(clients[i].sock);
                   remove_client(clients, i, &actual);
-                  strncpy(buffer, client.name, BUF_SIZE - 1);
-                  strncat(buffer, " disconnected !", BUF_SIZE - strlen(buffer) - 1);
-                  send_message_to_all_clients(clients, client, actual, buffer, 1);
                }
                else
                {
-                  if(strncmp(buffer, "START", 5) == 0){
-                     demarrer_partie(board, points);
-                     current_player = 1;
-                     snprintf(buffer, BUF_SIZE, "Nouvelle partie démarrée !");
-
-                     //boucle pour envoyer a tous les clients mais il faudra changer pour envoyer qu'aux deux clients connecté sur le jeu
-                     for(int j = 0; j < actual; j++){
-                        envoyer_etat_jeu(clients[j].sock, board, points, current_player);
-                     }
-      
+                  buffer[strcspn(buffer, "\r\n")] = '\0';
+                  if(strcmp(buffer, "LIST") == 0)
+                  {
+                     envoyer_liste_joueurs(clients, actual, client.sock);
                   }
-                  else if (strncmp(buffer, "MOVE", 4) == 0){
-                     //si ce n'est pas le bon jouruer qui joue, on ignore le coup
-                     if (client.player != current_player) continue;
-
-                     //si le coup est invalide, on envoie un message d'erreur au client et on ignore le coup
-                     coup_valide = traiter_coup(board, points, current_player, atoi(buffer + 5));
-                     if (!coup_valide){
-                        snprintf(buffer, BUF_SIZE, "Coup invalide !");
+                  else if(strncmp(buffer, "INVITE ", 7) == 0)
+                  {
+                     char username[BUF_SIZE];
+                     int target_index;
+                     if(sscanf(buffer + 7, "%1023s", username) != 1)
+                     {
+                        write_client(client.sock, "Usage : INVITE pseudo");
                         continue;
                      }
-                     
-                     //boucle pour envoyer a tous les clients mais il faudra changer pour envoyer qu'aux deux clients connecté sur le jeu
-                     for(int j = 0; j < actual; j++){
-                        envoyer_etat_jeu(clients[j].sock, board, points, current_player);
+
+                     target_index = trouver_client_par_pseudo(clients, actual, username);
+                     if(target_index < 0)
+                     {
+                        write_client(client.sock, "Pseudo introuvable.");
+                     }
+                     else if(target_index == i)
+                     {
+                        write_client(client.sock, "Vous ne pouvez pas vous inviter vous-meme.");
+                     }
+                     else if(!client.available || !clients[target_index].available)
+                     {
+                        write_client(client.sock, "Vous ou ce joueur etes deja en partie ou avez une invitation en attente.");
+                     }
+                     else
+                     {
+                        clients[i].available = false;
+                        clients[target_index].available = false;
+                        snprintf(clients[target_index].invited_by,
+                                 sizeof clients[target_index].invited_by, "%s", client.name);
+                        snprintf(buffer, sizeof buffer,
+                                 "INVITATION de %.900s. Repondez ACCEPT ou REFUSE.",
+                                 client.name);
+                        write_client(clients[target_index].sock, buffer);
+                        snprintf(buffer, sizeof buffer, "Invitation envoyee a %.950s.", username);
+                        write_client(client.sock, buffer);
+                     }
+                  }
+                  else if(strcmp(buffer, "ACCEPT") == 0 || strcmp(buffer, "REFUSE") == 0)
+                  {
+                     bool accept = strcmp(buffer, "ACCEPT") == 0;
+                     if(client.invited_by[0] == '\0')
+                     {
+                        write_client(client.sock, "Aucune invitation en attente.");
+                        continue;
                      }
 
-                     current_player = current_player == 1 ? 2 : 1;
+                     int inviter_index = trouver_client_par_pseudo(
+                        clients, actual, client.invited_by);
+                     if(inviter_index < 0)
+                     {
+                        clients[i].invited_by[0] = '\0';
+                        clients[i].available = true;
+                        write_client(client.sock, "L'invitation n'est plus valide.");
+                        continue;
+                     }
+
+                     if(!accept)
+                     {
+                        clients[inviter_index].available = true;
+                        clients[i].available = true;
+                        clients[i].invited_by[0] = '\0';
+                        write_client(clients[inviter_index].sock, "Invitation refusee.");
+                        write_client(client.sock, "Invitation refusee.");
+                        continue;
+                     }
+
+                     int game_index = trouver_partie_libre(games);
+                     if(game_index < 0)
+                     {
+                        clients[inviter_index].available = true;
+                        clients[i].available = true;
+                        clients[i].invited_by[0] = '\0';
+                        write_client(clients[inviter_index].sock, "Impossible de creer une partie : toutes les parties sont occupees.");
+                        write_client(client.sock, "Impossible de creer une partie : toutes les parties sont occupees.");
+                        continue;
+                     }
+
+                     Game *game = &games[game_index];
+                     memset(game, 0, sizeof *game);
+                     game->active = true;
+                     game->num_partie = next_game_id++;
+                     game->player1 = clients[inviter_index];
+                     game->player2 = clients[i];
+                     game->current_player = 1;
+                     clients[i].invited_by[0] = '\0';
+                     demarrer_partie(game->board, game->points);
+                     snprintf(buffer, sizeof buffer, "Partie %d creee contre %.900s.",
+                              game->num_partie, client.name);
+                     write_client(clients[inviter_index].sock, buffer);
+                     snprintf(buffer, sizeof buffer, "Partie %d creee contre %.900s.",
+                              game->num_partie, clients[inviter_index].name);
+                     write_client(client.sock, buffer);
+                     envoyer_etat_partie(game);
                   }
-                  else if (strcmp(buffer, "SEND")== 0){
-                     send_message_to_all_clients(clients, client, actual, buffer, 0);
+                  else if(strncmp(buffer, "MOVE ", 5) == 0)
+                  {
+                     int game_index = trouver_partie_par_socket(games, client.sock);
+                     int pit = 0;
+                     if(game_index < 0)
+                     {
+                        write_client(client.sock, "Vous n'etes pas dans une partie.");
+                        continue;
+                     }
+                     if(sscanf(buffer + 5, "%d", &pit) != 1 || pit < 1 || pit > 6)
+                     {
+                        write_client(client.sock, "Usage : MOVE numero_de_case (1 a 6)");
+                        continue;
+                     }
+
+                     Game *game = &games[game_index];
+                     int player = game->player1.sock == client.sock ? 1 : 2;
+                     if(player != game->current_player)
+                     {
+                        write_client(client.sock, "Ce n'est pas votre tour.");
+                        continue;
+                     }
+                     if(!verif_end_game(game->board, game->points, game->current_player))
+                     {
+                        terminer_partie(game, clients, actual, "Partie terminee.");
+                        continue;
+                     }
+                     if(!traiter_coup(game->board, game->points, player, pit))
+                     {
+                        write_client(client.sock, "Coup invalide.");
+                        continue;
+                     }
+
+                     game->current_player = game->current_player == 1 ? 2 : 1;
+                     if(!verif_end_game(game->board, game->points, game->current_player))
+                     {
+                        terminer_partie(game, clients, actual, "Partie terminee.");
+                     }
+                     else
+                     {
+                        envoyer_etat_partie(game);
+                     }
+                  }
+                  else if(strcmp(buffer, "END") == 0)
+                  {
+                     int game_index = trouver_partie_par_socket(games, client.sock);
+                     if(game_index >= 0)
+                     {
+                        terminer_partie(&games[game_index], clients, actual,
+                                        "Partie terminee.");
+                     }
+                     else
+                     {
+                        write_client(client.sock, "Vous n'etes pas dans une partie.");
+                     }
+                  }
+                  else if (strncmp(buffer, "SEND", 4) == 0){
+                     send_message_to_all_clients(clients, client, actual, buffer + 5, 0);
                   }
                   else {
-                     snprintf(buffer, BUF_SIZE, "Commande inconnue !");
+                     write_client(client.sock, "Commande inconnue. Utilisez LIST, INVITE pseudo, ACCEPT, REFUSE, MOVE n ou END.");
                   }
                }
                break;

@@ -13,6 +13,7 @@
 #include <arpa/inet.h>
 #include <unistd.h> /* close */
 #include <netdb.h> /* gethostbyname */
+#include <sys/select.h>
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
 #define closesocket(s) close(s)
@@ -30,10 +31,21 @@ typedef struct in_addr IN_ADDR;
 #define CRLF        "\r\n"
 #define PORT         1977
 #define MAX_CLIENTS     100
-
 #define BUF_SIZE    1024
 
+#include <stdbool.h>
 #include "client2.h"
+
+typedef struct
+{
+   bool active;
+   int num_partie;
+   Client player1;
+   Client player2;
+   int board[12];
+   int points[2];
+   int current_player;
+} Game;
 
 static void init(void);
 static void end(void);

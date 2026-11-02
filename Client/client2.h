@@ -32,7 +32,7 @@ typedef struct in_addr IN_ADDR;
 
 #define BUF_SIZE 1024
 
-void client_afficher_etat_jeu(const int board[12], const int points[2], int current_player);
+// void client_afficher_etat_jeu(const int board[12], const int points[2], int current_player, char* username);
 int client_demander_coup(void);
 
 static void init(void);
