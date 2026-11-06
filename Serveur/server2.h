@@ -58,6 +58,8 @@ typedef struct
    GameState *history;
    size_t history_count;
    size_t history_capacity;
+   SOCKET spectateurs[MAX_CLIENTS];
+   int nombre_spectateurs;
 } Game;
 
 static void init(void);

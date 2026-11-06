@@ -476,6 +476,50 @@ static void liberer_partie(Game *game)
    memset(game, 0, sizeof *game);
 }
 
+static int trouver_partie_par_numero(Game *games, int numero_partie)
+{
+   for(int i = 0; i < MAX_CLIENTS / 2; i++)
+   {
+      if(games[i].active && games[i].num_partie == numero_partie)
+      {
+         return i;
+      }
+   }
+
+   return -1;
+}
+
+static bool ajouter_spectateur(Game *game, SOCKET sock)
+{
+   for(int i = 0; i < game->nombre_spectateurs; i++)
+   {
+      if(game->spectateurs[i] == sock)
+      {
+         return true;
+      }
+   }
+
+   if(game->nombre_spectateurs >= MAX_CLIENTS)
+   {
+      return false;
+   }
+
+   game->spectateurs[game->nombre_spectateurs++] = sock;
+   return true;
+}
+
+static void retirer_spectateur(Game *game, SOCKET sock)
+{
+   for(int i = 0; i < game->nombre_spectateurs; i++)
+   {
+      if(game->spectateurs[i] == sock)
+      {
+         game->spectateurs[i] = game->spectateurs[--game->nombre_spectateurs];
+         return;
+      }
+   }
+}
+
 static void envoyer_liste_joueurs(Client *clients, int actual, SOCKET requester)
 {
    char message[BUF_SIZE] = "Joueurs disponibles :";
@@ -541,6 +585,15 @@ static void envoyer_liste_parties(Game *games, SOCKET requester)
    write_client(requester, message);
 }
 
+static void envoyer_etat_spectateur(const Game *game, SOCKET sock)
+{
+   const char *username = game->current_player == 1
+      ? game->player1.name : game->player2.name;
+
+   envoyer_etat_jeu(sock, game->board, game->points, username,
+                    game->player2.name, game->player1.name);
+}
+
 static void envoyer_etat_partie(const Game *game)
 {
    const char *username = game->current_player == 1
@@ -550,6 +603,11 @@ static void envoyer_etat_partie(const Game *game)
                     game->player2.name, game->player1.name);
    envoyer_etat_jeu(game->player2.sock, game->board, game->points, username,
                     game->player2.name, game->player1.name);
+
+   for(int i = 0; i < game->nombre_spectateurs; i++)
+   {
+      envoyer_etat_spectateur(game, game->spectateurs[i]);
+   }
 }
 
 static int trouver_partie_libre(Game *games)
@@ -567,6 +625,8 @@ static int trouver_partie_libre(Game *games)
 
 static void demander_sauvegarde(Game *game, Client *clients, int actual)
 {
+   const char *spectator_message = "La partie est terminee.";
+
    for(int i = 0; i < actual; i++)
    {
       if(clients[i].sock == game->player1.sock ||
@@ -579,6 +639,11 @@ static void demander_sauvegarde(Game *game, Client *clients, int actual)
       }
    }
 
+   for(int i = 0; i < game->nombre_spectateurs; i++)
+   {
+      write_client(game->spectateurs[i], spectator_message);
+   }
+   game->nombre_spectateurs = 0;
    game->active = false;
    game->awaiting_save = true;
 }
@@ -592,15 +657,13 @@ static void afficher_commandes(SOCKET sock){
                            "REFUSE            - Refuse une invitation\n"
                            "MOVE n            - Joue un coup (1 à 6)\n"
                            "END               - Termine la partie en cours\n"
-                           "SEND public       - Envoie un message à tous les joueurs connectés\n"
-                           "SEND private pseudo - Envoie un message privé à un joueur\n"
+                           "SEND PUBLIC       - Envoie un message à tous les joueurs connectés\n"
+                           "SEND PRIVATE pseudo message - Envoie un message privé à un joueur\n"
                            "LIST GAMES        - Affiche la liste des parties en cours\n"
                            "WATCH game_id     - Regarde une partie en cours\n"
                            "WRITE BIO         - Ecrit ou modifie ta biographie\n"
                            "READ BIO pseudo   - Lit la biographie d'un joueur\n"
-                           "OUI / NON         - Repond a une demande de sauvegarde\n"
-                           "REVIEW            - Affiche les parties sauvegardees\n"
-                           "NEXT              - Affiche le prochain coup pendant REVIEW\n";
+                           "REVIEW            - Revoit une partie sauvegardée\n";
 
    write_client(sock, buffer);
 }
@@ -709,6 +772,11 @@ static void app(void)
                {
                   for(int g = 0; g < MAX_CLIENTS / 2; g++)
                   {
+                     retirer_spectateur(&games[g], client.sock);
+                  }
+
+                  for(int g = 0; g < MAX_CLIENTS / 2; g++)
+                  {
                      if((games[g].active || games[g].awaiting_save) &&
                         (games[g].player1.sock == client.sock ||
                          games[g].player2.sock == client.sock))
@@ -726,6 +794,12 @@ static void app(void)
                               break;
                            }
                         }
+                        for(int k = 0; k < games[g].nombre_spectateurs; k++)
+                        {
+                           write_client(games[g].spectateurs[k],
+                                        "Partie interrompue : un joueur s'est deconnecte.");
+                        }
+                        games[g].nombre_spectateurs = 0;
                         liberer_partie(&games[g]);
                      }
                   }
@@ -848,6 +922,41 @@ static void app(void)
                   {
                      envoyer_liste_parties(games, client.sock);
                   }
+                  else if(strncmp(buffer, "WATCH ", 6) == 0)
+                  {
+                     int numero_partie = 0;
+                     char caractere_supplementaire;
+                     if(sscanf(buffer + 6, "%d %c", &numero_partie,
+                               &caractere_supplementaire) != 1 || numero_partie <= 0)
+                     {
+                        write_client(client.sock, "Usage : WATCH numero_partie");
+                        continue;
+                     }
+
+                     if(trouver_partie_par_socket(games, client.sock) >= 0)
+                     {
+                        write_client(client.sock, "Vous ne pouvez pas regarder une partie pendant que vous jouez.");
+                        continue;
+                     }
+
+                     int game_index = trouver_partie_par_numero(games, numero_partie);
+                     if(game_index < 0)
+                     {
+                        write_client(client.sock, "Partie introuvable ou terminee.");
+                     }
+                     else if(!ajouter_spectateur(&games[game_index], client.sock))
+                     {
+                        write_client(client.sock, "La partie a atteint sa limite de spectateurs.");
+                     }
+                     else
+                     {
+                        Game *game = &games[game_index];
+                        snprintf(buffer, sizeof buffer,
+                                 "Vous regardez maintenant la partie %d.", numero_partie);
+                        write_client(client.sock, buffer);
+                        envoyer_etat_spectateur(game, client.sock);
+                     }
+                  }
                   else if(strncmp(buffer, "INVITE ", 7) == 0)
                   {
                      char username[BUF_SIZE];
@@ -865,7 +974,7 @@ static void app(void)
                      }
                      else if(target_index == i)
                      {
-                        write_client(client.sock, "Vous ne pouvez pas vous inviter vous-meme.");
+                        write_client(client.sock, "Vous ne pouvez pas vous envoyer un message a vous-meme.");
                      }
                      else if(!client.available || !clients[target_index].available)
                      {
@@ -1007,8 +1116,46 @@ static void app(void)
                         write_client(client.sock, "Vous n'etes pas dans une partie.");
                      }
                   }
-                  else if (strncmp(buffer, "SEND", 4) == 0){
-                     send_message_to_all_clients(clients, client, actual, buffer + 5, 0);
+                  else if (strncmp(buffer, "SEND PUBLIC", 11) == 0){
+                     send_message_to_all_clients(clients, client, actual, buffer + 12, 0);
+                  }
+                  else if (strncmp(buffer, "SEND PRIVATE", 12)== 0){
+                     char username[BUF_SIZE];
+                     char message[BUF_SIZE];
+                     int target_index;
+                     int username_length = 0;
+                     const char *private_text;
+                     if(sscanf(buffer + 13, "%1023s%n", username, &username_length) != 1)
+                     {
+                        write_client(client.sock, "Usage : SEND PRIVATE pseudo message");
+                        continue;
+                     }
+
+                     private_text = buffer + 13 + username_length;
+                     while(*private_text == ' ' || *private_text == '\t')
+                     {
+                        private_text++;
+                     }
+                     if(*private_text == '\0')
+                     {
+                        write_client(client.sock, "Usage : SEND PRIVATE pseudo message");
+                        continue;
+                     }
+
+                     target_index = trouver_client_par_pseudo(clients, actual, username);
+                     if(target_index < 0)
+                     {
+                        write_client(client.sock, "Pseudo introuvable.");
+                     }
+                     else if(target_index == i)
+                     {
+                        write_client(client.sock, "Vous ne pouvez pas envoyer de message vous-meme.");
+                     } 
+                     else 
+                     {
+                        snprintf(message, sizeof message, "%s (prive) : %s", client.name, private_text);
+                        write_client(clients[target_index].sock, message);
+                     }
                   }
                   else if(strcmp(buffer, "HELP") == 0)
                   {
@@ -1070,7 +1217,7 @@ static void send_message_to_all_clients(Client *clients, Client sender, int actu
          if(from_server == 0)
          {
             strncpy(message, sender.name, BUF_SIZE - 1);
-            strncat(message, " : ", sizeof message - strlen(message) - 1);
+            strncat(message, " (public) : ", sizeof message - strlen(message) - 1);
          }
          strncat(message, buffer, sizeof message - strlen(message) - 1);
          write_client(clients[i].sock, message);
