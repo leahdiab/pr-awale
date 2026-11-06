@@ -111,6 +111,50 @@ static int trouver_partie_par_socket(Game *games, SOCKET sock)
    return -1;
 }
 
+static int trouver_partie_par_numero(Game *games, int numero_partie)
+{
+   for(int i = 0; i < MAX_CLIENTS / 2; i++)
+   {
+      if(games[i].active && games[i].num_partie == numero_partie)
+      {
+         return i;
+      }
+   }
+
+   return -1;
+}
+
+static bool ajouter_spectateur(Game *game, SOCKET sock)
+{
+   for(int i = 0; i < game->nombre_spectateurs; i++)
+   {
+      if(game->spectateurs[i] == sock)
+      {
+         return true;
+      }
+   }
+
+   if(game->nombre_spectateurs >= MAX_CLIENTS)
+   {
+      return false;
+   }
+
+   game->spectateurs[game->nombre_spectateurs++] = sock;
+   return true;
+}
+
+static void retirer_spectateur(Game *game, SOCKET sock)
+{
+   for(int i = 0; i < game->nombre_spectateurs; i++)
+   {
+      if(game->spectateurs[i] == sock)
+      {
+         game->spectateurs[i] = game->spectateurs[--game->nombre_spectateurs];
+         return;
+      }
+   }
+}
+
 static void envoyer_liste_joueurs(Client *clients, int actual, SOCKET requester)
 {
    char message[BUF_SIZE] = "Joueurs disponibles :";
@@ -176,6 +220,15 @@ static void envoyer_liste_parties(Game *games, SOCKET requester)
    write_client(requester, message);
 }
 
+static void envoyer_etat_spectateur(const Game *game, SOCKET sock)
+{
+   const char *username = game->current_player == 1
+      ? game->player1.name : game->player2.name;
+
+   envoyer_etat_jeu(sock, game->board, game->points, username,
+                    game->player2.name, game->player1.name);
+}
+
 static void envoyer_etat_partie(const Game *game)
 {
    const char *username = game->current_player == 1
@@ -185,6 +238,11 @@ static void envoyer_etat_partie(const Game *game)
                     game->player2.name, game->player1.name);
    envoyer_etat_jeu(game->player2.sock, game->board, game->points, username,
                     game->player2.name, game->player1.name);
+
+   for(int i = 0; i < game->nombre_spectateurs; i++)
+   {
+      envoyer_etat_spectateur(game, game->spectateurs[i]);
+   }
 }
 
 static int trouver_partie_libre(Game *games)
@@ -213,6 +271,11 @@ static void terminer_partie(Game *game, Client *clients, int actual, const char 
       }
    }
 
+   for(int i = 0; i < game->nombre_spectateurs; i++)
+   {
+      write_client(game->spectateurs[i], message);
+   }
+   game->nombre_spectateurs = 0;
    game->active = false;
 }
 
@@ -340,6 +403,11 @@ static void app(void)
                {
                   for(int g = 0; g < MAX_CLIENTS / 2; g++)
                   {
+                     retirer_spectateur(&games[g], client.sock);
+                  }
+
+                  for(int g = 0; g < MAX_CLIENTS / 2; g++)
+                  {
                      if(games[g].active &&
                         (games[g].player1.sock == client.sock ||
                          games[g].player2.sock == client.sock))
@@ -355,6 +423,12 @@ static void app(void)
                               break;
                            }
                         }
+                        for(int k = 0; k < games[g].nombre_spectateurs; k++)
+                        {
+                           write_client(games[g].spectateurs[k],
+                                        "Partie interrompue : un joueur s'est deconnecte.");
+                        }
+                        games[g].nombre_spectateurs = 0;
                         games[g].active = false;
                      }
                   }
@@ -389,6 +463,41 @@ static void app(void)
                   else if(strcmp(buffer, "LIST GAMES") == 0)
                   {
                      envoyer_liste_parties(games, client.sock);
+                  }
+                  else if(strncmp(buffer, "WATCH ", 6) == 0)
+                  {
+                     int numero_partie = 0;
+                     char caractere_supplementaire;
+                     if(sscanf(buffer + 6, "%d %c", &numero_partie,
+                               &caractere_supplementaire) != 1 || numero_partie <= 0)
+                     {
+                        write_client(client.sock, "Usage : WATCH numero_partie");
+                        continue;
+                     }
+
+                     if(trouver_partie_par_socket(games, client.sock) >= 0)
+                     {
+                        write_client(client.sock, "Vous ne pouvez pas regarder une partie pendant que vous jouez.");
+                        continue;
+                     }
+
+                     int game_index = trouver_partie_par_numero(games, numero_partie);
+                     if(game_index < 0)
+                     {
+                        write_client(client.sock, "Partie introuvable ou terminee.");
+                     }
+                     else if(!ajouter_spectateur(&games[game_index], client.sock))
+                     {
+                        write_client(client.sock, "La partie a atteint sa limite de spectateurs.");
+                     }
+                     else
+                     {
+                        Game *game = &games[game_index];
+                        snprintf(buffer, sizeof buffer,
+                                 "Vous regardez maintenant la partie %d.", numero_partie);
+                        write_client(client.sock, buffer);
+                        envoyer_etat_spectateur(game, client.sock);
+                     }
                   }
                   else if(strncmp(buffer, "INVITE ", 7) == 0)
                   {

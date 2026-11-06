@@ -45,6 +45,8 @@ typedef struct
    int board[12];
    int points[2];
    int current_player;
+   SOCKET spectateurs[MAX_CLIENTS];
+   int nombre_spectateurs;
 } Game;
 
 static void init(void);
