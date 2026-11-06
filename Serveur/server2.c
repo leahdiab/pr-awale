@@ -177,6 +177,27 @@ static void terminer_partie(Game *game, Client *clients, int actual, const char 
    game->active = false;
 }
 
+static void afficher_commandes(SOCKET sock){
+   char buffer[BUF_SIZE] = "           Commandes disponibles :\n"
+                           "HELP              - Affiche la liste des commandes disponibles\n"
+                           "LIST PLAYERS      - Affiche la liste des joueurs disponibles\n"
+                           "INVITE pseudo     - Invite un joueur à une partie\n"
+                           "ACCEPT            - Accepte une invitation\n"
+                           "REFUSE            - Refuse une invitation\n"
+                           "MOVE n            - Joue un coup (1 à 6)\n"
+                           "END               - Termine la partie en cours\n"
+                           "SEND public       - Envoie un message à tous les joueurs connectés\n"
+                           "SEND private pseudo - Envoie un message privé à un joueur\n"
+                           "LIST GAMES        - Affiche la liste des parties en cours\n"
+                           "WATCH game_id     - Regarde une partie en cours\n"
+                           "WRITE BIO         - Ecrit ou modifie ta biographie\n"
+                           "READ BIO pseudo   - Lit la biographie d'un joueur\n"
+                           "SAVE              - Sauvegarde la partie en cours\n"
+                           "REVIEW            - Revoit une partie sauvegardée\n";
+
+   write_client(sock, buffer);
+}
+
 
 static void app(void)
 {
@@ -262,7 +283,8 @@ static void app(void)
          snprintf(c.name, sizeof c.name, "%s", buffer);
 
          clients[actual] = c;
-         write_client(csock, "Connecte. Envoyez LIST pour voir les joueurs disponibles.");
+         write_client(csock, "Connecte.");
+         afficher_commandes(csock);
          actual++;
       }
       else
@@ -479,9 +501,14 @@ static void app(void)
                   else if (strncmp(buffer, "SEND", 4) == 0){
                      send_message_to_all_clients(clients, client, actual, buffer + 5, 0);
                   }
+                  else if(strcmp(buffer, "HELP") == 0)
+                  {
+                     afficher_commandes(client.sock);
+                  }
                   else {
                      write_client(client.sock, "Commande inconnue. Utilisez LIST, INVITE pseudo, ACCEPT, REFUSE, MOVE n ou END.");
                   }
+               
                }
                break;
             }
