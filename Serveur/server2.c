@@ -62,7 +62,9 @@ bool traiter_coup(int board[12], int points[2], int current_player, int pit)
    return make_move(board, points, current_player, pit);
 }
 
-void envoyer_etat_jeu(SOCKET sock, const int board[12], const int points[2], const char* username)
+void envoyer_etat_jeu(SOCKET sock, const int board[12], const int points[2],
+                      const char *username, const char *top_username,
+                      const char *bottom_username)
 {
    char buffer[BUF_SIZE];
    snprintf(buffer, BUF_SIZE, "Plateau :\n\n");
@@ -70,12 +72,13 @@ void envoyer_etat_jeu(SOCKET sock, const int board[12], const int points[2], con
    {
       snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "%d  | ", board[i]);
    }
-   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "\n");
+   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "  %s\n", top_username);
    for(int i = 0; i < 6; i++)
    {
       snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "%d  | ", board[i]);
    }
-   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "\n\nPoints : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
+   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "  %s\n\n", bottom_username);
+   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "Points : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
    snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "Joueur courant : %s\n", username);
 
    write_client(sock, buffer);
@@ -140,13 +143,48 @@ static void envoyer_liste_joueurs(Client *clients, int actual, SOCKET requester)
    write_client(requester, message);
 }
 
+static void envoyer_liste_parties(Game *games, SOCKET requester)
+{
+   char message[BUF_SIZE] = "Parties en cours :";
+   int count = 0;
+
+   for(int i = 0; i < MAX_CLIENTS / 2; i++)
+   {
+      if(games[i].active)
+      {
+         const char *current_player = games[i].current_player == 1
+            ? games[i].player1.name : games[i].player2.name;
+         size_t used = strlen(message);
+         count++;
+         int written = snprintf(message + used, sizeof message - used,
+                                "\nPartie %d : %s contre %s (tour de %s)",
+                                games[i].num_partie, games[i].player1.name,
+                                games[i].player2.name, current_player);
+         if(written < 0 || (size_t)written >= sizeof message - used)
+         {
+            break;
+         }
+      }
+   }
+
+   if(count == 0)
+   {
+      strncat(message, "\nAucune partie en cours.",
+              sizeof message - strlen(message) - 1);
+   }
+
+   write_client(requester, message);
+}
+
 static void envoyer_etat_partie(const Game *game)
 {
    const char *username = game->current_player == 1
       ? game->player1.name : game->player2.name;
 
-   envoyer_etat_jeu(game->player1.sock, game->board, game->points, username);
-   envoyer_etat_jeu(game->player2.sock, game->board, game->points, username);
+   envoyer_etat_jeu(game->player1.sock, game->board, game->points, username,
+                    game->player2.name, game->player1.name);
+   envoyer_etat_jeu(game->player2.sock, game->board, game->points, username,
+                    game->player2.name, game->player1.name);
 }
 
 static int trouver_partie_libre(Game *games)
@@ -344,9 +382,13 @@ static void app(void)
                else
                {
                   buffer[strcspn(buffer, "\r\n")] = '\0';
-                  if(strcmp(buffer, "LIST") == 0)
+                  if(strcmp(buffer, "LIST PLAYERS") == 0 )
                   {
                      envoyer_liste_joueurs(clients, actual, client.sock);
+                  }
+                  else if(strcmp(buffer, "LIST GAMES") == 0)
+                  {
+                     envoyer_liste_parties(games, client.sock);
                   }
                   else if(strncmp(buffer, "INVITE ", 7) == 0)
                   {
