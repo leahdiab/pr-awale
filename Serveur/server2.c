@@ -383,8 +383,7 @@ static void app(void)
                else
                {
                   buffer[strcspn(buffer, "\r\n")] = '\0';
-                  if(strcmp(buffer, "LIST") == 0 ||
-                     strcmp(buffer, "LIST PLAYERS") == 0)
+                  if(strcmp(buffer, "LIST PLAYERS") == 0 )
                   {
                      envoyer_liste_joueurs(clients, actual, client.sock);
                   }
