@@ -62,7 +62,9 @@ bool traiter_coup(int board[12], int points[2], int current_player, int pit)
    return make_move(board, points, current_player, pit);
 }
 
-void envoyer_etat_jeu(SOCKET sock, const int board[12], const int points[2], const char* username)
+void envoyer_etat_jeu(SOCKET sock, const int board[12], const int points[2],
+                      const char *username, const char *top_username,
+                      const char *bottom_username)
 {
    char buffer[BUF_SIZE];
    snprintf(buffer, BUF_SIZE, "Plateau :\n\n");
@@ -70,12 +72,13 @@ void envoyer_etat_jeu(SOCKET sock, const int board[12], const int points[2], con
    {
       snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "%d  | ", board[i]);
    }
-   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "\n");
+   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "  %s\n", top_username);
    for(int i = 0; i < 6; i++)
    {
       snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "%d  | ", board[i]);
    }
-   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "\n\nPoints : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
+   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "  %s\n\n", bottom_username);
+   snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "Points : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
    snprintf(buffer + strlen(buffer), BUF_SIZE - strlen(buffer), "Joueur courant : %s\n", username);
 
    write_client(sock, buffer);
@@ -145,8 +148,10 @@ static void envoyer_etat_partie(const Game *game)
    const char *username = game->current_player == 1
       ? game->player1.name : game->player2.name;
 
-   envoyer_etat_jeu(game->player1.sock, game->board, game->points, username);
-   envoyer_etat_jeu(game->player2.sock, game->board, game->points, username);
+   envoyer_etat_jeu(game->player1.sock, game->board, game->points, username,
+                    game->player2.name, game->player1.name);
+   envoyer_etat_jeu(game->player2.sock, game->board, game->points, username,
+                    game->player2.name, game->player1.name);
 }
 
 static int trouver_partie_libre(Game *games)
