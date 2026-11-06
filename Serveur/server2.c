@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <string.h>
+#include <time.h>
 
 #include "server2.h"
 #include "client2.h"
@@ -431,7 +432,7 @@ static void app(void)
                      game->num_partie = next_game_id++;
                      game->player1 = clients[inviter_index];
                      game->player2 = clients[i];
-                     game->current_player = 1;
+                     game->current_player = rand() > RAND_MAX / 2 ? 2 : 1;
                      clients[i].invited_by[0] = '\0';
                      demarrer_partie(game->board, game->points);
                      snprintf(buffer, sizeof buffer, "Partie %d creee contre %.900s.",
@@ -622,6 +623,8 @@ static void write_client(SOCKET sock, const char *buffer)
 
 int main(int argc, char **argv)
 {
+   srand((unsigned int)time(NULL));
+
    init();
 
    app();
