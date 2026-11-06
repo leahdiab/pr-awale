@@ -1162,7 +1162,8 @@ static void app(void)
                      afficher_commandes(client.sock);
                   }
                   else {
-                     write_client(client.sock, "Commande inconnue. Utilisez LIST, INVITE pseudo, ACCEPT, REFUSE, MOVE n ou END.");
+                     write_client(client.sock,
+                                  "Commande inconnue. Tapez HELP pour afficher les commandes disponibles.");
                   }
                
                }
