@@ -187,13 +187,12 @@ static void afficher_commandes(SOCKET sock){
                            "REFUSE            - Refuse une invitation\n"
                            "MOVE n            - Joue un coup (1 à 6)\n"
                            "END               - Termine la partie en cours\n"
-                           "SEND public       - Envoie un message à tous les joueurs connectés\n"
-                           "SEND private pseudo - Envoie un message privé à un joueur\n"
+                           "SEND PUBLIC       - Envoie un message à tous les joueurs connectés\n"
+                           "SEND PRIVATE pseudo message - Envoie un message privé à un joueur\n"
                            "LIST GAMES        - Affiche la liste des parties en cours\n"
                            "WATCH game_id     - Regarde une partie en cours\n"
                            "WRITE BIO         - Ecrit ou modifie ta biographie\n"
                            "READ BIO pseudo   - Lit la biographie d'un joueur\n"
-                           "SAVE              - Sauvegarde la partie en cours\n"
                            "REVIEW            - Revoit une partie sauvegardée\n";
 
    write_client(sock, buffer);
@@ -366,7 +365,7 @@ static void app(void)
                      }
                      else if(target_index == i)
                      {
-                        write_client(client.sock, "Vous ne pouvez pas vous inviter vous-meme.");
+                        write_client(client.sock, "Vous ne pouvez pas vous envoyer un message a vous-meme.");
                      }
                      else if(!client.available || !clients[target_index].available)
                      {
@@ -499,8 +498,46 @@ static void app(void)
                         write_client(client.sock, "Vous n'etes pas dans une partie.");
                      }
                   }
-                  else if (strncmp(buffer, "SEND", 4) == 0){
-                     send_message_to_all_clients(clients, client, actual, buffer + 5, 0);
+                  else if (strncmp(buffer, "SEND PUBLIC", 11) == 0){
+                     send_message_to_all_clients(clients, client, actual, buffer + 12, 0);
+                  }
+                  else if (strncmp(buffer, "SEND PRIVATE", 12)== 0){
+                     char username[BUF_SIZE];
+                     char message[BUF_SIZE];
+                     int target_index;
+                     int username_length = 0;
+                     const char *private_text;
+                     if(sscanf(buffer + 13, "%1023s%n", username, &username_length) != 1)
+                     {
+                        write_client(client.sock, "Usage : SEND PRIVATE pseudo message");
+                        continue;
+                     }
+
+                     private_text = buffer + 13 + username_length;
+                     while(*private_text == ' ' || *private_text == '\t')
+                     {
+                        private_text++;
+                     }
+                     if(*private_text == '\0')
+                     {
+                        write_client(client.sock, "Usage : SEND PRIVATE pseudo message");
+                        continue;
+                     }
+
+                     target_index = trouver_client_par_pseudo(clients, actual, username);
+                     if(target_index < 0)
+                     {
+                        write_client(client.sock, "Pseudo introuvable.");
+                     }
+                     else if(target_index == i)
+                     {
+                        write_client(client.sock, "Vous ne pouvez pas envoyer de message vous-meme.");
+                     } 
+                     else 
+                     {
+                        snprintf(message, sizeof message, "%s (prive) : %s", client.name, private_text);
+                        write_client(clients[target_index].sock, message);
+                     }
                   }
                   else if(strcmp(buffer, "HELP") == 0)
                   {
@@ -553,7 +590,7 @@ static void send_message_to_all_clients(Client *clients, Client sender, int actu
          if(from_server == 0)
          {
             strncpy(message, sender.name, BUF_SIZE - 1);
-            strncat(message, " : ", sizeof message - strlen(message) - 1);
+            strncat(message, " (public) : ", sizeof message - strlen(message) - 1);
          }
          strncat(message, buffer, sizeof message - strlen(message) - 1);
          write_client(clients[i].sock, message);
