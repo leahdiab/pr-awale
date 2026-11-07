@@ -610,6 +610,52 @@ static void envoyer_etat_partie(const Game *game)
    }
 }
 
+static void envoyer_fin_partie(const Game *game)
+{
+   char message[BUF_SIZE];
+   int winner = game->points[0] == game->points[1]
+      ? 0 : (game->points[0] > game->points[1] ? 1 : 2);
+
+   snprintf(message, sizeof message, "====== FIN DE PARTIE======\nPlateau :\n\n");
+   for(int i = 11; i >= 6; i--)
+   {
+      snprintf(message + strlen(message), sizeof message - strlen(message),
+               "%d  | ", game->board[i]);
+   }
+   snprintf(message + strlen(message), sizeof message - strlen(message),
+            "  %.80s\n", game->player2.name);
+   for(int i = 0; i < 6; i++)
+   {
+      snprintf(message + strlen(message), sizeof message - strlen(message),
+               "%d  | ", game->board[i]);
+   }
+   snprintf(message + strlen(message), sizeof message - strlen(message),
+            "  %.80s\n\n", game->player1.name);
+   snprintf(message + strlen(message), sizeof message - strlen(message),
+            "Points : %.80s = %d, %.80s = %d\n",
+            game->player1.name, game->points[0],
+            game->player2.name, game->points[1]);
+   if(winner == 0)
+   {
+      snprintf(message + strlen(message), sizeof message - strlen(message),
+               "Resultat : egalite.\n");
+   }
+   else
+   {
+      const char *winner_name = winner == 1
+         ? game->player1.name : game->player2.name;
+      snprintf(message + strlen(message), sizeof message - strlen(message),
+               "Gagnant : %.800s\n", winner_name);
+   }
+
+   write_client(game->player1.sock, message);
+   write_client(game->player2.sock, message);
+   for(int i = 0; i < game->nombre_spectateurs; i++)
+   {
+      write_client(game->spectateurs[i], message);
+   }
+}
+
 static int trouver_partie_libre(Game *games)
 {
    for(int i = 0; i < MAX_CLIENTS / 2; i++)
@@ -1098,6 +1144,7 @@ static void app(void)
                      }
                      if(!verif_end_game(game->board, game->points, game->current_player))
                      {
+                        envoyer_fin_partie(game);
                         demander_sauvegarde(game, clients, actual);
                         continue;
                      }
@@ -1120,6 +1167,7 @@ static void app(void)
                      }
                      if(!game_continues)
                      {
+                        envoyer_fin_partie(game);
                         demander_sauvegarde(game, clients, actual);
                      }
                      else
