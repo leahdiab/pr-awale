@@ -2,6 +2,16 @@
 
 #include "awale.h"
 
+void demarrer_partie(int board[12], int points[2])
+{
+   for(int i = 0; i < 12; i++)
+   {
+      board[i] = 4;
+   }
+   points[0] = 0;
+   points[1] = 0;
+}
+
 static int is_player_pit(int pit, int player)
 {
    return player == 1 ? pit < 6 : pit >= 6;
@@ -55,6 +65,10 @@ bool make_move(int board[12], int points[2], int player, int pit)
    int seeds = 0;
    int position = 0;
    int opponent_empty = 0;
+   int opponent_seeds = 0;
+   int capture_seeds = 0;
+   int capture_count = 0;
+   int capture_position = 0;
 
    if(player < 1 || player > 2 || pit < 1 || pit > 6)
    {
@@ -88,12 +102,29 @@ bool make_move(int board[12], int points[2], int player, int pit)
       seeds--;
    }
 
-   while(!is_player_pit(position, player) &&
-         (board[position] == 2 || board[position] == 3))
+   for(int i = player == 1 ? 6 : 0; i < (player == 1 ? 12 : 6); i++)
    {
-      points[player - 1] += board[position];
-      board[position] = 0;
-      position = (position + 11) % 12;
+      opponent_seeds += board[i];
+   }
+
+   capture_position = position;
+   while(!is_player_pit(capture_position, player) &&
+         (board[capture_position] == 2 || board[capture_position] == 3))
+   {
+      capture_seeds += board[capture_position];
+      capture_count++;
+      capture_position = (capture_position + 11) % 12;
+   }
+
+   if(capture_seeds < opponent_seeds)
+   {
+      capture_position = position;
+      for(int i = 0; i < capture_count; i++)
+      {
+         points[player - 1] += board[capture_position];
+         board[capture_position] = 0;
+         capture_position = (capture_position + 11) % 12;
+      }
    }
 
    return true;
@@ -105,6 +136,11 @@ bool verif_end_game(int board[12], int points[2], int current_player)
    int opponent_first_pit = 0;
    int own_has_seeds = 0;
    int i = 0;
+
+   if(current_player < 1 || current_player > 2)
+   {
+      return false;
+   }
 
    own_first_pit = current_player == 1 ? 0 : 6;
    opponent_first_pit = current_player == 1 ? 6 : 0;

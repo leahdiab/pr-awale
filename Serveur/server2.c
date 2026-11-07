@@ -47,17 +47,6 @@ static void end(void)
 //    printf("Joueur courant : %d\n", current_player);
 // }
 
-void demarrer_partie(int board[12], int points[2])
-{
-   int i = 0;
-   for(i = 0; i < 12; i++)
-   {
-      board[i] = 4;
-   }
-   points[0] = 0;
-   points[1] = 0;
-}
-
 bool traiter_coup(int board[12], int points[2], int current_player, int pit)
 {
    return make_move(board, points, current_player, pit);
