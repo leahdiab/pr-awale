@@ -60,6 +60,8 @@ typedef struct
    size_t history_capacity;
    SOCKET spectateurs[MAX_CLIENTS];
    int nombre_spectateurs;
+   bool private_game;
+   bool privacy_pending;
 } Game;
 
 static void init(void);
