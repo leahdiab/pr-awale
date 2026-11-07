@@ -34,17 +34,30 @@ typedef struct in_addr IN_ADDR;
 #define BUF_SIZE    1024
 
 #include <stdbool.h>
+#include <stddef.h>
 #include "client2.h"
 
 typedef struct
 {
+   int board[12];
+   int points[2];
+   int current_player;
+} GameState;
+
+typedef struct
+{
    bool active;
+   bool awaiting_save;
+   bool history_failed;
    int num_partie;
    Client player1;
    Client player2;
    int board[12];
    int points[2];
    int current_player;
+   GameState *history;
+   size_t history_count;
+   size_t history_capacity;
    SOCKET spectateurs[MAX_CLIENTS];
    int nombre_spectateurs;
 } Game;
