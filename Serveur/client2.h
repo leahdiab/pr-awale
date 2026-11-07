@@ -10,6 +10,7 @@ typedef struct
    char name[BUF_SIZE];
    bool available;
    char invited_by[BUF_SIZE];
+   char bio[BUF_SIZE];
 }Client;
 
 #endif /* guard */

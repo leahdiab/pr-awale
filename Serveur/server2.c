@@ -299,6 +299,28 @@ static void afficher_commandes(SOCKET sock){
    write_client(sock, buffer);
 }
 
+static void ecrire_biographie( SOCKET sock, Client *clients, int actual, const char *bio){
+   char message[BUF_SIZE];
+   snprintf(message, sizeof message, "Biographie mise à jour : %s", bio);
+   write_client(sock, message);
+
+}
+
+static void lire_biographie( SOCKET sock, Client *clients, int actual, const char *username){
+   int target_index = trouver_client_par_pseudo(clients, actual, username);
+   if(target_index < 0)
+   {
+      write_client(sock, "Pseudo introuvable.");
+   }
+   else
+   {
+      char message[BUF_SIZE];
+      snprintf(message, sizeof message, "%s : %s", clients[target_index].name, clients[target_index].bio);
+      write_client(sock, message);
+   }
+
+}
+
 
 static void app(void)
 {
@@ -382,6 +404,7 @@ static void app(void)
          c.sock = csock;
          c.available = true;
          snprintf(c.name, sizeof c.name, "%s", buffer);
+         c.bio[0] = '\0'; // Initialize bio
 
          clients[actual] = c;
          write_client(csock, "Connecte.");
@@ -693,6 +716,31 @@ static void app(void)
                   else if(strcmp(buffer, "HELP") == 0)
                   {
                      afficher_commandes(client.sock);
+                  }
+                  else if(strncmp(buffer, "WRITE BIO ", 10) == 0)
+                  {
+                     const char *bio_text = buffer + 10;
+                     while(*bio_text == ' ' || *bio_text == '\t')
+                     {
+                        bio_text++;
+                     }
+                     if(*bio_text == '\0')
+                     {
+                        write_client(client.sock, "Usage : WRITE BIO votre_biographie");
+                        continue;
+                     }
+                     ecrire_biographie(client.sock, clients, actual, bio_text);
+                     strncpy(clients[i].bio, bio_text, sizeof clients[i].bio - 1);
+                  }
+                  else if(strncmp(buffer, "READ BIO ", 9) == 0)
+                  {
+                     char username[BUF_SIZE];
+                     if(sscanf(buffer + 9, "%1023s", username) != 1)
+                     {
+                        write_client(client.sock, "Usage : READ BIO pseudo");
+                        continue;
+                     }
+                     lire_biographie(client.sock, clients, actual, username);
                   }
                   else {
                      write_client(client.sock, "Commande inconnue. Utilisez LIST, INVITE pseudo, ACCEPT, REFUSE, MOVE n ou END.");
