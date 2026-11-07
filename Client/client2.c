@@ -158,7 +158,7 @@ static void app(const char *address, const char *name)
             printf("Server disconnected !\n");
             break;
          }
-         puts(buffer);
+         printf("%s\n\n", buffer);
       }
    }
 

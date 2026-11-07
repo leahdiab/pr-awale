@@ -178,6 +178,123 @@ static bool ajouter_lien_amitie(const char *player1, const char *player2)
    return true;
 }
 
+static bool supprimer_lien_amitie(const char *player1, const char *player2)
+{
+   const char *temporary_path = "friends.txt.tmp";
+   FILE *source;
+   FILE *temporary;
+   bool removed = false;
+
+   if(!sont_amis(player1, player2))
+   {
+      return false;
+   }
+
+   source = fopen("friends.txt", "r");
+   if(source == NULL)
+   {
+      perror("fopen(friends.txt)");
+      return false;
+   }
+
+   temporary = fopen(temporary_path, "w");
+   if(temporary == NULL)
+   {
+      perror("fopen(friends.txt.tmp)");
+      fclose(source);
+      return false;
+   }
+
+   char line[2 * BUF_SIZE + 2];
+   bool success = true;
+   while(fgets(line, sizeof line, source) != NULL)
+   {
+      char *separator = strchr(line, '\t');
+      if(separator == NULL)
+      {
+         fprintf(stderr, "Ligne invalide dans friends.txt\n");
+         success = false;
+         break;
+      }
+
+      *separator = '\0';
+      char *stored_player2 = separator + 1;
+      stored_player2[strcspn(stored_player2, "\r\n")] = '\0';
+      bool matching_link =
+         (strcmp(line, player1) == 0 && strcmp(stored_player2, player2) == 0) ||
+         (strcmp(line, player2) == 0 && strcmp(stored_player2, player1) == 0);
+
+      *separator = '\t';
+      if(matching_link)
+      {
+         removed = true;
+      }
+      else if(fputs(line, temporary) == EOF)
+      {
+         perror("fputs(friends.txt.tmp)");
+         success = false;
+         break;
+      }
+   }
+
+   if(ferror(source))
+   {
+      perror("fgets(friends.txt)");
+      success = false;
+   }
+   if(fclose(source) != 0)
+   {
+      perror("fclose(friends.txt)");
+      success = false;
+   }
+   if(fclose(temporary) != 0)
+   {
+      perror("fclose(friends.txt.tmp)");
+      success = false;
+   }
+
+   if(!success || !removed)
+   {
+      if(!removed && success)
+      {
+         fprintf(stderr, "Amitie absente de friends.txt\n");
+      }
+      if(remove(temporary_path) != 0)
+      {
+         perror("remove(friends.txt.tmp)");
+      }
+      return false;
+   }
+
+   if(rename(temporary_path, "friends.txt") != 0)
+   {
+      perror("rename(friends.txt.tmp, friends.txt)");
+      if(remove(temporary_path) != 0)
+      {
+         perror("remove(friends.txt.tmp)");
+      }
+      return false;
+   }
+
+   FriendLink **link = &friendships;
+   while(*link != NULL)
+   {
+      if((strcmp((*link)->player1, player1) == 0 &&
+          strcmp((*link)->player2, player2) == 0) ||
+         (strcmp((*link)->player1, player2) == 0 &&
+          strcmp((*link)->player2, player1) == 0))
+      {
+         FriendLink *removed_link = *link;
+         *link = removed_link->next;
+         free(removed_link);
+         break;
+      }
+      link = &(*link)->next;
+   }
+
+   return true;
+}
+
 static bool charger_amitiees(void)
 {
    FILE *file = fopen("friends.txt", "r");
@@ -1023,31 +1140,34 @@ static void partie_privee(SOCKET sock, Game *game)
 
 
 static void afficher_commandes(SOCKET sock){
-   char buffer[BUF_SIZE] = "           Commandes disponibles :\n"
-                           "HELP - Affiche cette aide\n"
+   char buffer[BUF_SIZE * 2] = "\n==========Commandes disponibles : ==========\n"
+                           "HELP                   - Affiche cette aide\n\n"
 
-                           "LIST PLAYERS - Joueurs disponibles et en partie\n"
-                           "CHALLENGE pseudo - Invite a jouer\n"
-                           "ACCEPT pseudo - Accepte une invitation\n"
-                           "REFUSE pseudo - Refuse une invitation\n"
+                           "LIST PLAYERS           - Joueurs disponibles et en partie\n"
+                           "CHALLENGE pseudo       - Invite a jouer\n"
+                           "ACCEPT pseudo          - Accepte une invitation\n"
+                           "REFUSE pseudo          - Refuse une invitation\n\n"
 
-                           "LIST FRIENDS - Affiche tes amis et demandes\n"
-                           "ADD FRIEND pseudo - Envoie une demande d'ami\n"
-                           "ACCEPT FRIEND pseudo - Accepte une demande\n"
-                           "REFUSE FRIEND pseudo - Refuse une demande\n"
+                           "LIST FRIENDS           - Affiche tes amis et demandes\n"
+                           "ADD FRIEND pseudo      - Envoie une demande d'ami\n"
+                           "REMOVE FRIEND pseudo   - Supprime un ami\n"
+                           "ACCEPT FRIEND pseudo   - Accepte une demande\n"
+                           "REFUSE FRIEND pseudo   - Refuse une demande\n\n"
 
-                           "MOVE n - Joue un coup (1 a 6)\n"
-                           "END - Termine la partie\n"
+                           "MOVE n                 - Joue un coup (1 a 6)\n"
+                           "END                    - Termine la partie\n\n"
 
-                           "SEND PUBLIC message - Message public\n"
-                           "SEND PRIVATE pseudo message - Message prive\n"
+                           "SEND PUBLIC message    - Message public\n"
+                           "SEND PRIVATE pseudo message - Message prive\n\n"
 
-                           "LIST GAMES - Affiche les parties en cours\n"
-                           "WATCH game_id - Regarde une partie\n"
-                           "STOP WATCH - Arrete le visionnage\n"
+                           "LIST GAMES             - Affiche les parties en cours\n"
+                           "WATCH game_id          - Regarde une partie\n"
+                           "STOP WATCH             - Arrete le visionnage\n\n"
 
-                           "WRITE BIO texte / READ BIO pseudo\n"
-                           "REVIEW - Revoit une partie sauvegardee\n";
+                           "WRITE BIO texte        - Ecrit ta biographie\n"
+                           "READ BIO pseudo        - Lit la biographie d'un joueur\n"
+                           "REVIEW                 - Revoit une partie sauvegardee\n"
+                           "============================\n";
 
    write_client(sock, buffer);
 }
@@ -1372,6 +1492,42 @@ static void app(void)
                                  client.name, client.name);
                         write_client(clients[target_index].sock, buffer);
                         write_client(client.sock, "Demande d'amitie envoyee.");
+                     }
+                  }
+                  else if(strncmp(buffer, "REMOVE FRIEND ", 14) == 0)
+                  {
+                     char username[BUF_SIZE];
+                     if(sscanf(buffer + 14, "%1023s", username) != 1)
+                     {
+                        write_client(client.sock, "Usage : REMOVE FRIEND pseudo");
+                        continue;
+                     }
+                     if(strcmp(username, client.name) == 0)
+                     {
+                        write_client(client.sock,
+                                     "Vous ne pouvez pas vous supprimer de votre liste d'amis.");
+                     }
+                     else if(!supprimer_lien_amitie(client.name, username))
+                     {
+                        write_client(client.sock,
+                                     "Cet utilisateur n'est pas dans votre liste d'amis, ou la suppression a echoue.");
+                     }
+                     else
+                     {
+                        snprintf(buffer, sizeof buffer,
+                                 "%.900s a ete retire de votre liste d'amis.",
+                                 username);
+                        write_client(client.sock, buffer);
+
+                        int friend_index = trouver_client_par_pseudo(
+                           clients, actual, username);
+                        if(friend_index >= 0)
+                        {
+                           snprintf(buffer, sizeof buffer,
+                                    "%.900s vous a retire de sa liste d'amis.",
+                                    client.name);
+                           write_client(clients[friend_index].sock, buffer);
+                        }
                      }
                   }
                   else if(strncmp(buffer, "ACCEPT FRIEND ", 14) == 0)
