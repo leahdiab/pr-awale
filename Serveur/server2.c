@@ -4,6 +4,7 @@
 #include <string.h>
 #include <time.h>
 #include <ctype.h>
+#include <limits.h>
 
 #include "server2.h"
 #include "client2.h"
@@ -25,6 +26,8 @@ typedef struct FriendRequest
 
 static FriendLink *friendships;
 static FriendRequest *friend_requests;
+
+static void liberer_partie(Game *game);
 
 static void init(void)
 {
@@ -551,6 +554,324 @@ static bool lire_champ_sauvegarde(const char *line, const char *prefix,
    return true;
 }
 
+static bool ecrire_etats_parties_en_cours(Game *games)
+{
+   const char *temporary_path = "ongoing_games.txt.tmp";
+   FILE *file = fopen(temporary_path, "w");
+   if(file == NULL)
+   {
+      perror("fopen(ongoing_games.txt.tmp)");
+      return false;
+   }
+
+   bool success = true;
+   for(int i = 0; i < MAX_CLIENTS / 2 && success; i++)
+   {
+      const Game *game = &games[i];
+      if(!game->active && !game->suspended)
+      {
+         continue;
+      }
+
+      success = fprintf(file,
+                        "ONGOING_GAME %d\nPLAYER1 %s\nPLAYER2 %s\n"
+                        "CURRENT %d\nPOINTS %d %d\nBOARD",
+                        game->num_partie, game->player1.name,
+                        game->player2.name, game->current_player,
+                        game->points[0], game->points[1]) >= 0;
+      for(int pit = 0; pit < 12 && success; pit++)
+      {
+         success = fprintf(file, " %d", game->board[pit]) >= 0;
+      }
+      if(success)
+      {
+         success = fprintf(file,
+                           "\nPRIVATE %d\nPRIVACY_PENDING %d\n"
+                           "HISTORY_FAILED %d\nHISTORY %zu\n",
+                           game->private_game, game->privacy_pending,
+                           game->history_failed, game->history_count) >= 0;
+      }
+      for(size_t state_index = 0;
+          state_index < game->history_count && success; state_index++)
+      {
+         const GameState *state = &game->history[state_index];
+         success = fprintf(file, "HSTATE %d %d %d",
+                           state->current_player, state->points[0],
+                           state->points[1]) >= 0;
+         for(int pit = 0; pit < 12 && success; pit++)
+         {
+            success = fprintf(file, " %d", state->board[pit]) >= 0;
+         }
+         if(success)
+         {
+            success = fprintf(file, "\n") >= 0;
+         }
+      }
+      if(success)
+      {
+         success = fprintf(file, "ENDONGOING\n") >= 0;
+      }
+   }
+
+   if(fclose(file) != 0)
+   {
+      perror("fclose(ongoing_games.txt.tmp)");
+      success = false;
+   }
+   if(!success)
+   {
+      fprintf(stderr, "Erreur pendant l'ecriture de ongoing_games.txt\n");
+      remove(temporary_path);
+      return false;
+   }
+
+#ifdef WIN32
+   if(remove("ongoing_games.txt") != 0 && errno != ENOENT)
+   {
+      perror("remove(ongoing_games.txt)");
+      remove(temporary_path);
+      return false;
+   }
+#endif
+   if(rename(temporary_path, "ongoing_games.txt") != 0)
+   {
+      perror("rename(ongoing_games.txt)");
+      remove(temporary_path);
+      return false;
+   }
+   return true;
+}
+
+static bool lire_ligne_partie_en_cours(FILE *file, char *line,
+                                       size_t line_size)
+{
+   if(fgets(line, (int)line_size, file) == NULL)
+   {
+      return false;
+   }
+   line[strcspn(line, "\r\n")] = '\0';
+   return true;
+}
+
+static bool charger_parties_en_cours(Game *games, int *next_game_id)
+{
+   FILE *file = fopen("ongoing_games.txt", "r");
+   char line[BUF_SIZE * 2];
+   int loaded = 0;
+
+   if(file == NULL)
+   {
+      if(errno == ENOENT)
+      {
+         return true;
+      }
+      perror("fopen(ongoing_games.txt)");
+      return false;
+   }
+
+   while(fgets(line, sizeof line, file) != NULL)
+   {
+      int game_id;
+      if(sscanf(line, "ONGOING_GAME %d", &game_id) != 1 ||
+         game_id <= 0 || game_id == INT_MAX ||
+         loaded >= MAX_CLIENTS / 2)
+      {
+         fprintf(stderr, "Fichier ongoing_games.txt invalide\n");
+         goto failure;
+      }
+
+      Game *game = &games[loaded];
+      memset(game, 0, sizeof *game);
+      game->num_partie = game_id;
+      game->active = false;
+      game->suspended = true;
+      game->player1.sock = INVALID_SOCKET;
+      game->player2.sock = INVALID_SOCKET;
+
+      if(!lire_ligne_partie_en_cours(file, line, sizeof line) ||
+         !lire_champ_sauvegarde(line, "PLAYER1 ", game->player1.name,
+                                sizeof game->player1.name) ||
+         !lire_ligne_partie_en_cours(file, line, sizeof line) ||
+         !lire_champ_sauvegarde(line, "PLAYER2 ", game->player2.name,
+                                sizeof game->player2.name) ||
+         !lire_ligne_partie_en_cours(file, line, sizeof line) ||
+         sscanf(line, "CURRENT %d", &game->current_player) != 1 ||
+         (game->current_player != 1 && game->current_player != 2) ||
+         !lire_ligne_partie_en_cours(file, line, sizeof line) ||
+         sscanf(line, "POINTS %d %d", &game->points[0],
+                &game->points[1]) != 2 ||
+         !lire_ligne_partie_en_cours(file, line, sizeof line) ||
+         strncmp(line, "BOARD ", 6) != 0)
+      {
+         fprintf(stderr, "Fichier ongoing_games.txt invalide\n");
+         goto failure;
+      }
+      int board_values[12];
+      char *board_value = line + 6;
+      for(int pit = 0; pit < 12; pit++)
+      {
+         char *next = NULL;
+         long value = strtol(board_value, &next, 10);
+         if(next == board_value || value < 0 || value > 48)
+         {
+            fprintf(stderr, "Plateau invalide dans ongoing_games.txt\n");
+            goto failure;
+         }
+         board_values[pit] = (int)value;
+         board_value = next;
+      }
+      while(isspace((unsigned char)*board_value))
+      {
+         board_value++;
+      }
+      if(*board_value != '\0')
+      {
+         fprintf(stderr, "Plateau invalide dans ongoing_games.txt\n");
+         goto failure;
+      }
+      memcpy(game->board, board_values, sizeof game->board);
+
+      int private_game;
+      int privacy_pending;
+      int history_failed;
+      size_t history_count;
+      if(!lire_ligne_partie_en_cours(file, line, sizeof line) ||
+         sscanf(line, "PRIVATE %d", &private_game) != 1 ||
+         (private_game != 0 && private_game != 1) ||
+         !lire_ligne_partie_en_cours(file, line, sizeof line) ||
+         sscanf(line, "PRIVACY_PENDING %d", &privacy_pending) != 1 ||
+         (privacy_pending != 0 && privacy_pending != 1) ||
+         !lire_ligne_partie_en_cours(file, line, sizeof line) ||
+         sscanf(line, "HISTORY_FAILED %d", &history_failed) != 1 ||
+         (history_failed != 0 && history_failed != 1) ||
+         !lire_ligne_partie_en_cours(file, line, sizeof line) ||
+         sscanf(line, "HISTORY %zu", &history_count) != 1 ||
+         history_count > (size_t)-1 / sizeof *game->history)
+      {
+         fprintf(stderr, "Fichier ongoing_games.txt invalide\n");
+         goto failure;
+      }
+      game->private_game = private_game != 0;
+      game->privacy_pending = privacy_pending != 0;
+      game->history_failed = history_failed != 0;
+      if(history_count > 0)
+      {
+         game->history = malloc(history_count * sizeof *game->history);
+         if(game->history == NULL)
+         {
+            perror("malloc(historique restaure)");
+            goto failure;
+         }
+         game->history_count = history_count;
+         game->history_capacity = history_count;
+      }
+      for(size_t state_index = 0; state_index < history_count; state_index++)
+      {
+         int values[15];
+         if(!lire_ligne_partie_en_cours(file, line, sizeof line) ||
+            sscanf(line, "HSTATE %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d",
+                   &values[0], &values[1], &values[2], &values[3],
+                   &values[4], &values[5], &values[6], &values[7],
+                   &values[8], &values[9], &values[10], &values[11],
+                   &values[12], &values[13], &values[14]) != 15 ||
+            (values[0] != 1 && values[0] != 2))
+         {
+            fprintf(stderr, "Historique invalide dans ongoing_games.txt\n");
+            goto failure;
+         }
+         GameState *state = &game->history[state_index];
+         state->current_player = values[0];
+         state->points[0] = values[1];
+         state->points[1] = values[2];
+         memcpy(state->board, &values[3], sizeof state->board);
+      }
+      if(!lire_ligne_partie_en_cours(file, line, sizeof line) ||
+         strcmp(line, "ENDONGOING") != 0)
+      {
+         fprintf(stderr, "Fichier ongoing_games.txt invalide\n");
+         goto failure;
+      }
+
+      if(game_id >= *next_game_id)
+      {
+         *next_game_id = game_id + 1;
+      }
+      loaded++;
+   }
+
+   if(ferror(file))
+   {
+      perror("fgets(ongoing_games.txt)");
+      goto failure;
+   }
+   if(fclose(file) != 0)
+   {
+      perror("fclose(ongoing_games.txt)");
+      return false;
+   }
+   return true;
+
+failure:
+   fclose(file);
+   for(int i = 0; i <= loaded && i < MAX_CLIENTS / 2; i++)
+   {
+      liberer_partie(&games[i]);
+   }
+   return false;
+}
+
+static void envoyer_mes_parties_en_cours(const Game *games,
+                                         const char *username, SOCKET sock)
+{
+   char message[BUF_SIZE] = "Vos parties recuperables :";
+   size_t count = 0;
+   for(int i = 0; i < MAX_CLIENTS / 2; i++)
+   {
+      const Game *game = &games[i];
+      const char *opponent = NULL;
+      if(!game->suspended)
+      {
+         continue;
+      }
+      if(strcmp(game->player1.name, username) == 0)
+      {
+         opponent = game->player2.name;
+      }
+      else if(strcmp(game->player2.name, username) == 0)
+      {
+         opponent = game->player1.name;
+      }
+      if(opponent == NULL)
+      {
+         continue;
+      }
+
+      size_t used = strlen(message);
+      int written = snprintf(message + used, sizeof message - used,
+                             "\nPartie %d contre %s", game->num_partie,
+                             opponent);
+      if(written < 0 || (size_t)written >= sizeof message - used)
+      {
+         strncat(message, "\n(liste tronquee)",
+                 sizeof message - strlen(message) - 1);
+         break;
+      }
+      count++;
+   }
+
+   if(count == 0)
+   {
+      strncat(message, "\nAucune partie recuperable.",
+              sizeof message - strlen(message) - 1);
+   }
+   else
+   {
+      strncat(message, "\nUtilisez RESUME numero_partie pour demander la reprise.",
+              sizeof message - strlen(message) - 1);
+   }
+   write_client(sock, message);
+}
+
 static bool envoyer_liste_sauvegardes(SOCKET sock, size_t *game_count)
 {
    FILE *file = fopen("saved_games.txt", "r");
@@ -815,6 +1136,18 @@ static int trouver_partie_par_numero(Game *games, int numero_partie)
       }
    }
 
+   return -1;
+}
+
+static int trouver_partie_suspendue_par_numero(Game *games, int numero_partie)
+{
+   for(int i = 0; i < MAX_CLIENTS / 2; i++)
+   {
+      if(games[i].suspended && games[i].num_partie == numero_partie)
+      {
+         return i;
+      }
+   }
    return -1;
 }
 
@@ -1097,7 +1430,8 @@ static int trouver_partie_libre(Game *games)
 {
    for(int i = 0; i < MAX_CLIENTS / 2; i++)
    {
-      if(!games[i].active && !games[i].awaiting_save)
+      if(!games[i].active && !games[i].suspended &&
+         !games[i].awaiting_save)
       {
          return i;
       }
@@ -1106,7 +1440,8 @@ static int trouver_partie_libre(Game *games)
    return -1;
 }
 
-static void demander_sauvegarde(Game *game, Client *clients, int actual)
+static void demander_sauvegarde(Game *games, Game *game,
+                                Client *clients, int actual)
 {
    const char *spectator_message = "La partie est terminee.";
 
@@ -1128,7 +1463,16 @@ static void demander_sauvegarde(Game *game, Client *clients, int actual)
    }
    game->nombre_spectateurs = 0;
    game->active = false;
+   game->suspended = false;
    game->awaiting_save = true;
+   if(!ecrire_etats_parties_en_cours(games))
+   {
+      fprintf(stderr, "La partie terminee peut encore figurer dans ongoing_games.txt\n");
+      write_client(game->player1.sock,
+                   "Erreur : la partie terminee n'a pas pu etre retiree du fichier des reprises.");
+      write_client(game->player2.sock,
+                   "Erreur : la partie terminee n'a pas pu etre retiree du fichier des reprises.");
+   }
 }
 
 static void partie_privee(SOCKET sock, Game *game)
@@ -1156,6 +1500,7 @@ static void afficher_commandes(SOCKET sock){
 
                            "MOVE n                 - Joue un coup (1 a 6)\n"
                            "END                    - Termine la partie\n\n"
+                           "LIST MY GAMES          - Affiche tes parties recuperables\n"
 
                            "SEND PUBLIC message    - Message public\n"
                            "SEND PRIVATE pseudo message - Message prive\n\n"
@@ -1208,6 +1553,11 @@ static void app(void)
    int next_game_id = 1;
 
    if(!charger_amitiees())
+   {
+      end_connection(sock);
+      exit(EXIT_FAILURE);
+   }
+   if(!charger_parties_en_cours(games, &next_game_id))
    {
       end_connection(sock);
       exit(EXIT_FAILURE);
@@ -1309,30 +1659,72 @@ static void app(void)
 
                   for(int g = 0; g < MAX_CLIENTS / 2; g++)
                   {
-                     if((games[g].active || games[g].awaiting_save) &&
-                        (games[g].player1.sock == client.sock ||
-                         games[g].player2.sock == client.sock))
+                     Game *game = &games[g];
+                     if((game->active || game->awaiting_save ||
+                         (game->suspended && game->resume_pending)) &&
+                        (game->player1.sock == client.sock ||
+                         game->player2.sock == client.sock))
                      {
-                        SOCKET other_sock = games[g].player1.sock == client.sock
-                           ? games[g].player2.sock : games[g].player1.sock;
+                        SOCKET other_sock = game->player1.sock == client.sock
+                           ? game->player2.sock : game->player1.sock;
                         for(int k = 0; k < actual; k++)
                         {
                            if(clients[k].sock == other_sock)
                            {
                               clients[k].available = true;
-                              write_client(other_sock, games[g].awaiting_save
+                              write_client(other_sock, game->awaiting_save
                                  ? "Demande de sauvegarde annulee : votre adversaire s'est deconnecte."
-                                 : "Votre adversaire s'est deconnecte. Vous etes disponible.");
+                                 : (game->resume_pending
+                                    ? "Demande de reprise annulee : votre adversaire s'est deconnecte."
+                                    : "Votre adversaire s'est deconnecte. La partie est interrompue; utilisez LIST MY GAMES pour la reprendre."));
                               break;
                            }
                         }
-                        for(int k = 0; k < games[g].nombre_spectateurs; k++)
+                        for(int k = 0; k < game->nombre_spectateurs; k++)
                         {
-                           write_client(games[g].spectateurs[k],
+                           write_client(game->spectateurs[k],
                                         "Partie interrompue : un joueur s'est deconnecte.");
                         }
-                        games[g].nombre_spectateurs = 0;
-                        liberer_partie(&games[g]);
+                        game->nombre_spectateurs = 0;
+                        if(game->awaiting_save)
+                        {
+                           liberer_partie(game);
+                        }
+                        else if(game->active)
+                        {
+                           game->active = false;
+                           game->suspended = true;
+                           game->resume_pending = false;
+                           game->resume_requester = 0;
+                           if(game->player1.sock == client.sock)
+                           {
+                              game->player1.sock = INVALID_SOCKET;
+                           }
+                           else
+                           {
+                              game->player2.sock = INVALID_SOCKET;
+                           }
+                           if(!ecrire_etats_parties_en_cours(games))
+                           {
+                              fprintf(stderr, "Impossible de sauvegarder la partie interrompue %d\n",
+                                      game->num_partie);
+                              write_client(other_sock,
+                                           "Erreur : la partie interrompue n'a pas pu etre sauvegardee sur le serveur.");
+                           }
+                        }
+                        else
+                        {
+                           game->resume_pending = false;
+                           game->resume_requester = 0;
+                           game->player1.sock = INVALID_SOCKET;
+                           game->player2.sock = INVALID_SOCKET;
+                           if(!ecrire_etats_parties_en_cours(games))
+                           {
+                              fprintf(stderr, "Impossible de sauvegarder les parties recuperables\n");
+                              write_client(other_sock,
+                                           "Erreur : impossible de sauvegarder l'etat recuperable de la partie.");
+                           }
+                        }
                      }
                   }
                   if(client.invited_by[0] != '\0')
@@ -1593,6 +1985,190 @@ static void app(void)
                         }
                      }
                   }
+                  else if(strcmp(buffer, "LIST MY GAMES") == 0)
+                  {
+                     envoyer_mes_parties_en_cours(games, client.name,
+                                                   client.sock);
+                  }
+                  else if(strncmp(buffer, "RESUME ", 7) == 0)
+                  {
+                     size_t requested_game;
+                     if(!lire_numero_commande(buffer + 7, &requested_game) ||
+                        requested_game > INT_MAX)
+                     {
+                        write_client(client.sock,
+                                     "Usage : RESUME numero_partie");
+                        continue;
+                     }
+
+                     int game_index = trouver_partie_suspendue_par_numero(
+                        games, (int)requested_game);
+                     if(game_index < 0)
+                     {
+                        write_client(client.sock,
+                                     "Partie recuperable introuvable.");
+                        continue;
+                     }
+
+                     Game *game = &games[game_index];
+                     if(game->resume_pending)
+                     {
+                        write_client(client.sock,
+                                     "Une demande de reprise est deja en cours pour cette partie.");
+                        continue;
+                     }
+
+                     int requester = strcmp(game->player1.name,
+                                            client.name) == 0 ? 1 :
+                        (strcmp(game->player2.name, client.name) == 0 ? 2 : 0);
+                     if(requester == 0)
+                     {
+                        write_client(client.sock,
+                                     "Cette partie ne vous appartient pas.");
+                        continue;
+                     }
+
+                     const char *opponent_name = requester == 1
+                        ? game->player2.name : game->player1.name;
+                     int opponent_index = trouver_client_par_pseudo(
+                        clients, actual, opponent_name);
+                     if(opponent_index < 0)
+                     {
+                        write_client(client.sock,
+                                     "Votre adversaire n'est pas connecte. Reessayez plus tard.");
+                        continue;
+                     }
+                     if(!client.available ||
+                        !clients[opponent_index].available)
+                     {
+                        write_client(client.sock,
+                                     "Vous ou votre adversaire etes deja occupes.");
+                        continue;
+                     }
+
+                     game->player1.sock = requester == 1
+                        ? client.sock : clients[opponent_index].sock;
+                     game->player2.sock = requester == 2
+                        ? client.sock : clients[opponent_index].sock;
+                     game->resume_pending = true;
+                     game->resume_requester = requester;
+                     clients[i].available = false;
+                     clients[opponent_index].available = false;
+                     snprintf(buffer, sizeof buffer,
+                              "DEMANDE DE REPRISE de %.400s pour la partie %d. Repondez ACCEPT RESUME %d ou REFUSE RESUME %d.",
+                              client.name, game->num_partie, game->num_partie,
+                              game->num_partie);
+                     write_client(clients[opponent_index].sock, buffer);
+                     snprintf(buffer, sizeof buffer,
+                              "Demande de reprise envoyee a %.400s.",
+                              opponent_name);
+                     write_client(client.sock, buffer);
+                  }
+                  else if(strncmp(buffer, "ACCEPT RESUME ", 14) == 0 ||
+                          strncmp(buffer, "REFUSE RESUME ", 14) == 0)
+                  {
+                     bool accept_resume = strncmp(buffer, "ACCEPT ", 7) == 0;
+                     size_t requested_game;
+                     if(!lire_numero_commande(buffer + 14, &requested_game) ||
+                        requested_game > INT_MAX)
+                     {
+                        write_client(client.sock,
+                                     accept_resume
+                                       ? "Usage : ACCEPT RESUME numero_partie"
+                                       : "Usage : REFUSE RESUME numero_partie");
+                        continue;
+                     }
+
+                     int game_index = trouver_partie_suspendue_par_numero(
+                        games, (int)requested_game);
+                     if(game_index < 0 || !games[game_index].resume_pending)
+                     {
+                        write_client(client.sock,
+                                     "Aucune demande de reprise en attente pour cette partie.");
+                        continue;
+                     }
+
+                     Game *game = &games[game_index];
+                     int responder = strcmp(game->player1.name,
+                                            client.name) == 0 ? 1 :
+                        (strcmp(game->player2.name, client.name) == 0 ? 2 : 0);
+                     if(responder == 0 ||
+                        responder == game->resume_requester ||
+                        (responder == 1 && game->player1.sock != client.sock) ||
+                        (responder == 2 && game->player2.sock != client.sock))
+                     {
+                        write_client(client.sock,
+                                     "Seul l'adversaire concerne peut repondre a cette demande.");
+                        continue;
+                     }
+
+                     int requester_index = trouver_client_par_pseudo(
+                        clients, actual,
+                        game->resume_requester == 1
+                           ? game->player1.name : game->player2.name);
+                     if(requester_index < 0)
+                     {
+                        game->resume_pending = false;
+                        game->resume_requester = 0;
+                        game->player1.sock = INVALID_SOCKET;
+                        game->player2.sock = INVALID_SOCKET;
+                        clients[i].available = true;
+                        write_client(client.sock,
+                                     "La personne ayant demande la reprise est deconnectee. Reessayez plus tard.");
+                        if(!ecrire_etats_parties_en_cours(games))
+                        {
+                           write_client(client.sock,
+                                        "Erreur : impossible de sauvegarder l'etat recuperable de la partie.");
+                        }
+                        continue;
+                     }
+
+                     if(accept_resume)
+                     {
+                        game->resume_pending = false;
+                        game->resume_requester = 0;
+                        game->suspended = false;
+                        game->active = true;
+                        clients[requester_index].available = false;
+                        clients[i].available = false;
+                        snprintf(buffer, sizeof buffer,
+                                 "Reprise de la partie %d acceptee.",
+                                 game->num_partie);
+                        write_client(game->player1.sock, buffer);
+                        write_client(game->player2.sock, buffer);
+                        if(game->privacy_pending)
+                        {
+                           write_client(game->player1.sock,
+                                        "Choisissez la visibilite de la partie : PRIVE ou PUBLIC.");
+                           write_client(game->player2.sock,
+                                        "Attendez que le createur choisisse la visibilite de la partie.");
+                        }
+                        else
+                        {
+                           envoyer_etat_partie(game);
+                        }
+                        if(!ecrire_etats_parties_en_cours(games))
+                        {
+                           write_client(game->player1.sock,
+                                        "Erreur : impossible de sauvegarder l'etat recuperable de la partie.");
+                           write_client(game->player2.sock,
+                                        "Erreur : impossible de sauvegarder l'etat recuperable de la partie.");
+                        }
+                     }
+                     else
+                     {
+                        game->resume_pending = false;
+                        game->resume_requester = 0;
+                        game->player1.sock = INVALID_SOCKET;
+                        game->player2.sock = INVALID_SOCKET;
+                        clients[requester_index].available = true;
+                        clients[i].available = true;
+                        write_client(clients[requester_index].sock,
+                                     "Votre demande de reprise a ete refusee. La partie reste recuperable.");
+                        write_client(client.sock,
+                                     "Demande de reprise refusee. La partie reste recuperable.");
+                     }
+                  }
                   else if(strcmp(buffer, "LIST GAMES") == 0)
                   {
                      envoyer_liste_parties(games, client.sock);
@@ -1623,6 +2199,13 @@ static void app(void)
                         write_client(game->player2.sock, game->private_game
                            ? "La partie est privee : seuls les amis d'au moins un joueur peuvent la regarder."
                            : "La partie est publique : tous les joueurs peuvent la regarder.");
+                        if(!ecrire_etats_parties_en_cours(games))
+                        {
+                           write_client(game->player1.sock,
+                                        "Erreur : impossible de sauvegarder l'etat recuperable de la partie.");
+                           write_client(game->player2.sock,
+                                        "Erreur : impossible de sauvegarder l'etat recuperable de la partie.");
+                        }
                         envoyer_etat_partie(game);
                      }
                   }
@@ -1788,6 +2371,13 @@ static void app(void)
                      write_client(game->player2.sock,
                                   "Attendez que le createur choisisse la visibilite de la partie.");
                      partie_privee(game->player1.sock, game);
+                     if(!ecrire_etats_parties_en_cours(games))
+                     {
+                        write_client(game->player1.sock,
+                                     "Erreur : la partie ne pourra pas etre restauree apres un arret du serveur.");
+                        write_client(game->player2.sock,
+                                     "Erreur : la partie ne pourra pas etre restauree apres un arret du serveur.");
+                     }
                   }
                   else if(strncmp(buffer, "MOVE ", 5) == 0)
                   {
@@ -1820,7 +2410,7 @@ static void app(void)
                      if(!verif_end_game(game->board, game->points, game->current_player))
                      {
                         envoyer_fin_partie(game);
-                        demander_sauvegarde(game, clients, actual);
+                        demander_sauvegarde(games, game, clients, actual);
                         continue;
                      }
                      if(!traiter_coup(game->board, game->points, player, pit))
@@ -1840,10 +2430,17 @@ static void app(void)
                         write_client(game->player2.sock,
                                      "Erreur : l'historique de la partie ne peut pas etre sauvegarde.");
                      }
+                     if(!ecrire_etats_parties_en_cours(games))
+                     {
+                        write_client(game->player1.sock,
+                                     "Erreur : impossible de sauvegarder l'etat recuperable de la partie.");
+                        write_client(game->player2.sock,
+                                     "Erreur : impossible de sauvegarder l'etat recuperable de la partie.");
+                     }
                      if(!game_continues)
                      {
                         envoyer_fin_partie(game);
-                        demander_sauvegarde(game, clients, actual);
+                        demander_sauvegarde(games, game, clients, actual);
                      }
                      else
                      {
@@ -1855,7 +2452,8 @@ static void app(void)
                      int game_index = trouver_partie_par_socket(games, client.sock);
                      if(game_index >= 0)
                      {
-                        demander_sauvegarde(&games[game_index], clients, actual);
+                        demander_sauvegarde(games, &games[game_index],
+                                             clients, actual);
                      }
                      else
                      {
@@ -1951,6 +2549,10 @@ static void app(void)
       }
    }
 
+   if(!ecrire_etats_parties_en_cours(games))
+   {
+      fprintf(stderr, "Les parties en cours n'ont pas toutes ete sauvegardees a l'arret.\n");
+   }
    liberer_amitiees();
    for(int g = 0; g < MAX_CLIENTS / 2; g++)
    {

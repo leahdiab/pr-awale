@@ -135,6 +135,38 @@ END
 
 Les joueurs sont ensuite invites a repondre `OUI` ou `NON` pour la sauvegarde. La partie est conservee si un joueur repond `OUI`.
 
+### Reprendre une partie interrompue
+
+Le serveur conserve les parties en cours apres chaque coup. Si un joueur se deconnecte ou si le serveur s'arrete, la partie devient recuperable.
+
+1. Reconnectez-vous avec le meme pseudo.
+2. Affichez vos parties recuperables :
+
+   ```text
+   LIST MY GAMES
+   ```
+
+3. Demandez la reprise avec le numero indique :
+
+   ```text
+   RESUME 1
+   ```
+
+   L'adversaire doit etre connecte et disponible. Sinon, le serveur indique qu'il n'est pas connecte ou disponible ; aucune demande n'est conservee et il faut reessayer plus tard.
+4. L'adversaire accepte ou refuse :
+
+   ```text
+   ACCEPT RESUME 1
+   ```
+
+   ou :
+
+   ```text
+   REFUSE RESUME 1
+   ```
+
+En cas de refus, la partie reste recuperable. Une partie terminee avec `END` ou par les regles du jeu ne peut plus etre reprise. Les parties recuperables sont conservees dans `ongoing_games.txt`, separement des parties terminees destinees a la relecture.
+
 ## 6. Amis
 
 ### Envoyer et traiter une demande
@@ -239,6 +271,7 @@ A la fin, utilisez de nouveau `REVIEW` pour choisir une autre partie. Les sauveg
 
 - `friends.txt` contient les liens d'amitie persistants.
 - `saved_games.txt` contient les parties sauvegardees.
+- `ongoing_games.txt` contient les parties interrompues qui peuvent etre reprises.
 - Ces fichiers sont lus et ecrits dans le repertoire courant du processus serveur. Lancez le serveur depuis un repertoire stable pour retrouver les memes donnees a chaque demarrage.
 - Si un client ne parvient pas a se connecter, verifiez que le serveur fonctionne, que l'adresse IP est correcte et que le port TCP `1977` n'est pas bloque par un pare-feu.
 - Si une commande est refusee, utilisez `HELP` et verifiez son orthographe ainsi que les arguments demandes.

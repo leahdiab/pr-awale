@@ -47,8 +47,11 @@ typedef struct
 typedef struct
 {
    bool active;
+   bool suspended;
    bool awaiting_save;
    bool history_failed;
+   bool resume_pending;
+   int resume_requester;
    int num_partie;
    Client player1;
    Client player2;
