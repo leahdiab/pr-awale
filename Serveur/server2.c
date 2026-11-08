@@ -2599,12 +2599,25 @@ static int init_connection(void)
 {
    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
    SOCKADDR_IN sin = { 0 };
+#ifndef WIN32
+   int reuse_address = 1;
+#endif
 
    if(sock == INVALID_SOCKET)
    {
       perror("socket()");
       exit(errno);
    }
+
+#ifndef WIN32
+   if(setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse_address,
+                 sizeof reuse_address) == SOCKET_ERROR)
+   {
+      perror("setsockopt(SO_REUSEADDR)");
+      closesocket(sock);
+      exit(errno);
+   }
+#endif
 
    sin.sin_addr.s_addr = htonl(INADDR_ANY);
    sin.sin_port = htons(PORT);
