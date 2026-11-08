@@ -1484,35 +1484,30 @@ static void partie_privee(SOCKET sock, Game *game)
 
 
 static void afficher_commandes(SOCKET sock){
-   char buffer[BUF_SIZE * 2] = "\n==========Commandes disponibles : ==========\n"
-                           "HELP                   - Affiche cette aide\n\n"
-
-                           "LIST PLAYERS           - Joueurs disponibles et en partie\n"
-                           "CHALLENGE pseudo       - Invite a jouer\n"
-                           "ACCEPT pseudo          - Accepte une invitation\n"
-                           "REFUSE pseudo          - Refuse une invitation\n\n"
-
-                           "LIST FRIENDS           - Affiche tes amis et demandes\n"
-                           "ADD FRIEND pseudo      - Envoie une demande d'ami\n"
-                           "REMOVE FRIEND pseudo   - Supprime un ami\n"
-                           "ACCEPT FRIEND pseudo   - Accepte une demande\n"
-                           "REFUSE FRIEND pseudo   - Refuse une demande\n\n"
-
-                           "MOVE n                 - Joue un coup (1 a 6)\n"
-                           "END                    - Termine la partie\n\n"
-                           "LIST MY GAMES          - Affiche tes parties recuperables\n"
-
-                           "SEND PUBLIC message    - Message public\n"
-                           "SEND PRIVATE pseudo message - Message prive\n\n"
-
-                           "LIST GAMES             - Affiche les parties en cours\n"
-                           "WATCH game_id          - Regarde une partie\n"
-                           "STOP WATCH             - Arrete le visionnage\n\n"
-
-                           "WRITE BIO texte        - Ecrit ta biographie\n"
-                           "READ BIO pseudo        - Lit la biographie d'un joueur\n"
-                           "REVIEW                 - Revoit une partie sauvegardee\n"
-                           "============================\n";
+   char buffer[BUF_SIZE * 2] =
+      "\n========== Commandes disponibles ==========\n"
+      "Aide\n"
+      "HELP                         - Affiche cette aide\n\n"
+      "Defis et amis\n"
+      "LIST PLAYERS                 - Affiche les joueurs connectes\n"
+      "CHALLENGE pseudo             - Invite un joueur a jouer\n"
+      "LIST FRIENDS                 - Affiche tes amis et demandes\n"
+      "ADD FRIEND pseudo            - Envoie une demande d'ami\n"
+      "REMOVE FRIEND pseudo         - Supprime un ami\n\n"
+      "Parties\n"
+      "MOVE numero                  - Joue un coup (1 a 6)\n"
+      "END                          - Termine la partie\n"
+      "LIST GAMES                   - Affiche les parties en cours\n"
+      "WATCH numero                 - Regarde une partie\n"
+      "LIST MY GAMES                - Affiche tes parties recuperables\n\n"
+      "Communication et profil\n"
+      "SEND PUBLIC message          - Envoie un message public\n"
+      "SEND PRIVATE pseudo message  - Envoie un message prive\n"
+      "WRITE BIO texte              - Ecrit ta biographie\n"
+      "READ BIO pseudo              - Lit la biographie d'un joueur\n\n"
+      "Relecture\n"
+      "REVIEW                       - Revoit une partie sauvegardee\n"
+      "===========================================\n";
 
    write_client(sock, buffer);
 }
