@@ -10,6 +10,7 @@
 #include "client2.h"
 #include "awale.h"
 
+/* Donnees temporaires des relations entre joueurs. */
 typedef struct FriendLink
 {
    char player1[BUF_SIZE];
@@ -29,6 +30,7 @@ static FriendRequest *friend_requests;
 
 static void liberer_partie(Game *game);
 
+/* Initialisation reseau du serveur. */
 static void init(void)
 {
 #ifdef WIN32
@@ -49,24 +51,7 @@ static void end(void)
 #endif
 }
 
-// void afficher_etat_jeu(const int board[12], const int points[2], int current_player)
-// {
-//    int i = 0;
-
-//    printf("Plateau :\n\n");
-//    for(i = 11; i >= 6; i--)
-//    {
-//       printf("%d  | ", board[i]);
-//    }
-//    printf("\n");
-//    for(i = 0; i < 6; i++)
-//    {
-//       printf("%d  | ", board[i]);
-//    }
-//    printf("\n\nPoints : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
-//    printf("Joueur courant : %d\n", current_player);
-// }
-
+/* Affichage du plateau et recherche des joueurs ou parties actifs. */
 bool traiter_coup(int board[12], int points[2], int current_player, int pit)
 {
    return make_move(board, points, current_player, pit);
@@ -121,6 +106,7 @@ static int trouver_partie_par_socket(Game *games, SOCKET sock)
    return -1;
 }
 
+/* Gestion des amities et des demandes en attente. */
 static bool sont_amis(const char *player1, const char *player2)
 {
    for(FriendLink *link = friendships; link != NULL; link = link->next)
@@ -444,6 +430,7 @@ static void liberer_amitiees(void)
    }
 }
 
+/* Historique et fichiers de sauvegarde ou de reprise des parties. */
 static int trouver_sauvegarde_en_attente(Game *games, SOCKET sock)
 {
    for(int i = 0; i < MAX_CLIENTS / 2; i++)
@@ -1120,6 +1107,7 @@ static void afficher_coup_sauvegarde(Client *client, size_t game_index,
    }
 }
 
+/* Gestion des parties en memoire et des spectateurs. */
 static void liberer_partie(Game *game)
 {
    free(game->history);
@@ -1188,6 +1176,7 @@ static bool peut_regarder_partie_privee(const Client *client, const Game *game)
           sont_amis(client->name, game->player2.name);
 }
 
+/* Construction des listes envoyees en reponse aux commandes du joueur. */
 static void envoyer_liste_amis(const Client *client)
 {
    char message[BUF_SIZE] = "Liste d'amis :";
@@ -1475,13 +1464,13 @@ static void demander_sauvegarde(Game *games, Game *game,
    }
 }
 
+/* Visibilite des parties, aide et informations de profil. */
 static void partie_privee(SOCKET sock, Game *game)
 {
    game->privacy_pending = true;
    write_client(sock,
                 "Choisissez la visibilite de la partie : PRIVE ou PUBLIC.");
 }
-
 
 static void afficher_commandes(SOCKET sock){
    char buffer[BUF_SIZE * 2] =
@@ -1534,15 +1523,127 @@ static void lire_biographie( SOCKET sock, Client *clients, int actual, const cha
 
 }
 
+/* Fonctions reseau appelees par la boucle principale. */
+static void clear_clients(Client *clients, int actual)
+{
+   int i = 0;
+   for(i = 0; i < actual; i++)
+   {
+      closesocket(clients[i].sock);
+   }
+}
 
+static void remove_client(Client *clients, int to_remove, int *actual)
+{
+
+   memmove(clients + to_remove, clients + to_remove + 1, (*actual - to_remove - 1) * sizeof(Client));
+
+   (*actual)--;
+}
+
+static void send_message_to_all_clients(Client *clients, Client sender, int actual, const char *buffer, char from_server)
+{
+   int i = 0;
+   char message[BUF_SIZE];
+   message[0] = 0;
+   for(i = 0; i < actual; i++)
+   {
+
+      if(sender.sock != clients[i].sock)
+      {
+         if(from_server == 0)
+         {
+            strncpy(message, sender.name, BUF_SIZE - 1);
+            strncat(message, " (public) : ", sizeof message - strlen(message) - 1);
+         }
+         strncat(message, buffer, sizeof message - strlen(message) - 1);
+         write_client(clients[i].sock, message);
+      }
+   }
+}
+
+static int init_connection(void)
+{
+   SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+   SOCKADDR_IN sin = { 0 };
+#ifndef WIN32
+   int reuse_address = 1;
+#endif
+
+   if(sock == INVALID_SOCKET)
+   {
+      perror("socket()");
+      exit(errno);
+   }
+
+#ifndef WIN32
+   if(setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse_address,
+                 sizeof reuse_address) == SOCKET_ERROR)
+   {
+      perror("setsockopt(SO_REUSEADDR)");
+      closesocket(sock);
+      exit(errno);
+   }
+#endif
+
+   sin.sin_addr.s_addr = htonl(INADDR_ANY);
+   sin.sin_port = htons(PORT);
+   sin.sin_family = AF_INET;
+
+   if(bind(sock,(SOCKADDR *) &sin, sizeof sin) == SOCKET_ERROR)
+   {
+      perror("bind()");
+      exit(errno);
+   }
+
+   if(listen(sock, MAX_CLIENTS) == SOCKET_ERROR)
+   {
+      perror("listen()");
+      exit(errno);
+   }
+
+   return sock;
+}
+
+static void end_connection(int sock)
+{
+   closesocket(sock);
+}
+
+static int read_client(SOCKET sock, char *buffer)
+{
+   int n = 0;
+
+   if((n = recv(sock, buffer, BUF_SIZE - 1, 0)) < 0)
+   {
+      perror("recv()");
+
+      n = 0;
+   }
+
+   buffer[n] = 0;
+
+   return n;
+}
+
+static void write_client(SOCKET sock, const char *buffer)
+{
+   if(send(sock, buffer, strlen(buffer), 0) < 0)
+   {
+      perror("send()");
+      exit(errno);
+   }
+}
+
+/* Boucle principale : connexions, deconnexions et commandes des joueurs. */
 static void app(void)
 {
    SOCKET sock = init_connection();
    char buffer[BUF_SIZE];
-   /* the index for the array */
+
    int actual = 0;
    int max = sock;
-   /* an array for all clients */
+
    Client clients[MAX_CLIENTS] = {0};
    Game games[MAX_CLIENTS / 2] = {0};
    int next_game_id = 1;
@@ -1565,13 +1666,10 @@ static void app(void)
       int i = 0;
       FD_ZERO(&rdfs);
 
-      /* add STDIN_FILENO */
       FD_SET(STDIN_FILENO, &rdfs);
 
-      /* add the connection socket */
       FD_SET(sock, &rdfs);
 
-      /* add socket of each client */
       for(i = 0; i < actual; i++)
       {
          FD_SET(clients[i].sock, &rdfs);
@@ -1583,15 +1681,14 @@ static void app(void)
          exit(errno);
       }
 
-      /* something from standard input : i.e keyboard */
       if(FD_ISSET(STDIN_FILENO, &rdfs))
       {
-         /* stop process when type on keyboard */
+
          break;
       }
       else if(FD_ISSET(sock, &rdfs))
       {
-         /* new client */
+
          SOCKADDR_IN csin = { 0 };
 #ifdef WIN32
          int sinsize = sizeof csin;
@@ -1605,7 +1702,6 @@ static void app(void)
             continue;
          }
 
-         /* after connecting the client sends its name */
          if(read_client(csock, buffer) <= 0)
          {
             closesocket(csock);
@@ -1621,14 +1717,13 @@ static void app(void)
             continue;
          }
 
-         /* what is the new maximum fd ? */
          max = csock > max ? csock : max;
 
          Client c = {0};
          c.sock = csock;
          c.available = true;
          snprintf(c.name, sizeof c.name, "%s", buffer);
-         c.bio[0] = '\0'; // Initialize bio
+         c.bio[0] = '\0';
          clients[actual] = c;
          write_client(csock, "Connecte.");
          afficher_commandes(csock);
@@ -1639,12 +1734,12 @@ static void app(void)
          int i = 0;
          for(i = 0; i < actual; i++)
          {
-            /* a client is talking */
+
             if(FD_ISSET(clients[i].sock, &rdfs))
             {
                Client client = clients[i];
                int c = read_client(clients[i].sock, buffer);
-               /* client disconnected */
+
                if(c == 0)
                {
                   for(int g = 0; g < MAX_CLIENTS / 2; g++)
@@ -1746,6 +1841,7 @@ static void app(void)
                else
                {
                   buffer[strcspn(buffer, "\r\n")] = '\0';
+                  /* REVIEW et NEXT : choix puis parcours d'une partie sauvegardee. */
                   if(strcmp(buffer, "REVIEW") == 0)
                   {
                      client.review_selection_pending = false;
@@ -1786,6 +1882,7 @@ static void app(void)
                         afficher_coup_sauvegarde(&client, game_index, 1);
                      }
                   }
+                  /* OUI/NON : confirmation ou refus de sauvegarder la partie terminee. */
                   else if(strcmp(buffer, "OUI") == 0 || strcmp(buffer, "NON") == 0)
                   {
                      int game_index = trouver_sauvegarde_en_attente(games, client.sock);
@@ -1833,14 +1930,17 @@ static void app(void)
                         liberer_partie(game);
                      }
                   }
+                  /* LIST PLAYERS : joueurs disponibles et joueurs en partie. */
                   else if(strcmp(buffer, "LIST PLAYERS") == 0 )
                   {
                      envoyer_liste_joueurs(clients, actual, games, client.sock);
                   }
+                  /* LIST FRIENDS : amis et demandes recues. */
                   else if(strcmp(buffer, "LIST FRIENDS") == 0)
                   {
                      envoyer_liste_amis(&client);
                   }
+                  /* ADD FRIEND : envoi d'une demande a un joueur connecte. */
                   else if(strncmp(buffer, "ADD FRIEND ", 11) == 0)
                   {
                      char username[BUF_SIZE];
@@ -1881,6 +1981,7 @@ static void app(void)
                         write_client(client.sock, "Demande d'amitie envoyee.");
                      }
                   }
+                  /* REMOVE FRIEND : suppression du lien des deux cotes. */
                   else if(strncmp(buffer, "REMOVE FRIEND ", 14) == 0)
                   {
                      char username[BUF_SIZE];
@@ -1917,6 +2018,7 @@ static void app(void)
                         }
                      }
                   }
+                  /* ACCEPT FRIEND : validation d'une demande recue. */
                   else if(strncmp(buffer, "ACCEPT FRIEND ", 14) == 0)
                   {
                      char username[BUF_SIZE];
@@ -1951,6 +2053,7 @@ static void app(void)
                         write_client(clients[sender_index].sock, buffer);
                      }
                   }
+                  /* REFUSE FRIEND : retrait d'une demande recue. */
                   else if(strncmp(buffer, "REFUSE FRIEND ", 14) == 0)
                   {
                      char username[BUF_SIZE];
@@ -1980,11 +2083,13 @@ static void app(void)
                         }
                      }
                   }
+                  /* LIST MY GAMES : parties interrompues du joueur. */
                   else if(strcmp(buffer, "LIST MY GAMES") == 0)
                   {
                      envoyer_mes_parties_en_cours(games, client.name,
                                                    client.sock);
                   }
+                  /* RESUME et reponse de l'adversaire : reprise d'une partie. */
                   else if(strncmp(buffer, "RESUME ", 7) == 0)
                   {
                      size_t requested_game;
@@ -2164,10 +2269,12 @@ static void app(void)
                                      "Demande de reprise refusee. La partie reste recuperable.");
                      }
                   }
+                  /* LIST GAMES : parties actuellement actives. */
                   else if(strcmp(buffer, "LIST GAMES") == 0)
                   {
                      envoyer_liste_parties(games, client.sock);
                   }
+                  /* PRIVE/PUBLIC : choix de visibilite par le createur. */
                   else if(strcmp(buffer, "PRIVE") == 0 ||
                           strcmp(buffer, "PUBLIC") == 0)
                   {
@@ -2204,6 +2311,7 @@ static void app(void)
                         envoyer_etat_partie(game);
                      }
                   }
+                  /* WATCH et STOP WATCH : abonnement aux mises a jour d'une partie. */
                   else if(strncmp(buffer, "WATCH ", 6) == 0)
                   {
                      int numero_partie = 0;
@@ -2271,6 +2379,7 @@ static void app(void)
                         ? "Vous ne regardez plus aucune partie."
                         : "Vous ne regardez aucune partie.");
                   }
+                  /* CHALLENGE puis ACCEPT/REFUSE : creation d'une nouvelle partie. */
                   else if(strncmp(buffer, "CHALLENGE ", 10) == 0)
                   {
                      char username[BUF_SIZE];
@@ -2374,6 +2483,7 @@ static void app(void)
                                      "Erreur : la partie ne pourra pas etre restauree apres un arret du serveur.");
                      }
                   }
+                  /* MOVE : validation du tour, application du coup et sauvegarde. */
                   else if(strncmp(buffer, "MOVE ", 5) == 0)
                   {
                      int game_index = trouver_partie_par_socket(games, client.sock);
@@ -2442,6 +2552,7 @@ static void app(void)
                         envoyer_etat_partie(game);
                      }
                   }
+                  /* END : fin volontaire et demande de sauvegarde. */
                   else if(strcmp(buffer, "END") == 0)
                   {
                      int game_index = trouver_partie_par_socket(games, client.sock);
@@ -2455,6 +2566,7 @@ static void app(void)
                         write_client(client.sock, "Vous n'etes pas dans une partie.");
                      }
                   }
+                  /* SEND PUBLIC/PRIVATE : messages entre joueurs. */
                   else if (strncmp(buffer, "SEND PUBLIC", 11) == 0){
                      send_message_to_all_clients(clients, client, actual, buffer + 12, 0);
                   }
@@ -2489,13 +2601,14 @@ static void app(void)
                      else if(target_index == i)
                      {
                         write_client(client.sock, "Vous ne pouvez pas envoyer de message vous-meme.");
-                     } 
-                     else 
+                     }
+                     else
                      {
                         snprintf(message, sizeof message, "%s (prive) : %s", client.name, private_text);
                         write_client(clients[target_index].sock, message);
                      }
                   }
+                  /* HELP et commandes de biographie. */
                   else if(strcmp(buffer, "HELP") == 0)
                   {
                      afficher_commandes(client.sock);
@@ -2529,7 +2642,7 @@ static void app(void)
                      write_client(client.sock,
                                   "Commande inconnue. Tapez HELP pour afficher les commandes disponibles.");
                   }
-               
+
                }
                clients[i].review_selection_pending = client.review_selection_pending;
                clients[i].reviewing = client.reviewing;
@@ -2539,7 +2652,6 @@ static void app(void)
                break;
             }
          }
-
 
       }
    }
@@ -2555,117 +2667,6 @@ static void app(void)
    }
    clear_clients(clients, actual);
    end_connection(sock);
-}
-
-static void clear_clients(Client *clients, int actual)
-{
-   int i = 0;
-   for(i = 0; i < actual; i++)
-   {
-      closesocket(clients[i].sock);
-   }
-}
-
-static void remove_client(Client *clients, int to_remove, int *actual)
-{
-   /* we remove the client in the array */
-   memmove(clients + to_remove, clients + to_remove + 1, (*actual - to_remove - 1) * sizeof(Client));
-   /* number client - 1 */
-   (*actual)--;
-}
-
-static void send_message_to_all_clients(Client *clients, Client sender, int actual, const char *buffer, char from_server)
-{
-   int i = 0;
-   char message[BUF_SIZE];
-   message[0] = 0;
-   for(i = 0; i < actual; i++)
-   {
-      /* we don't send message to the sender */
-      if(sender.sock != clients[i].sock)
-      {
-         if(from_server == 0)
-         {
-            strncpy(message, sender.name, BUF_SIZE - 1);
-            strncat(message, " (public) : ", sizeof message - strlen(message) - 1);
-         }
-         strncat(message, buffer, sizeof message - strlen(message) - 1);
-         write_client(clients[i].sock, message);
-      }
-   }
-}
-
-static int init_connection(void)
-{
-   SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
-   SOCKADDR_IN sin = { 0 };
-#ifndef WIN32
-   int reuse_address = 1;
-#endif
-
-   if(sock == INVALID_SOCKET)
-   {
-      perror("socket()");
-      exit(errno);
-   }
-
-#ifndef WIN32
-   if(setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuse_address,
-                 sizeof reuse_address) == SOCKET_ERROR)
-   {
-      perror("setsockopt(SO_REUSEADDR)");
-      closesocket(sock);
-      exit(errno);
-   }
-#endif
-
-   sin.sin_addr.s_addr = htonl(INADDR_ANY);
-   sin.sin_port = htons(PORT);
-   sin.sin_family = AF_INET;
-
-   if(bind(sock,(SOCKADDR *) &sin, sizeof sin) == SOCKET_ERROR)
-   {
-      perror("bind()");
-      exit(errno);
-   }
-
-   if(listen(sock, MAX_CLIENTS) == SOCKET_ERROR)
-   {
-      perror("listen()");
-      exit(errno);
-   }
-
-   return sock;
-}
-
-static void end_connection(int sock)
-{
-   closesocket(sock);
-}
-
-static int read_client(SOCKET sock, char *buffer)
-{
-   int n = 0;
-
-   if((n = recv(sock, buffer, BUF_SIZE - 1, 0)) < 0)
-   {
-      perror("recv()");
-      /* if recv error we disonnect the client */
-      n = 0;
-   }
-
-   buffer[n] = 0;
-
-   return n;
-}
-
-static void write_client(SOCKET sock, const char *buffer)
-{
-   if(send(sock, buffer, strlen(buffer), 0) < 0)
-   {
-      perror("send()");
-      exit(errno);
-   }
 }
 
 int main(int argc, char **argv)

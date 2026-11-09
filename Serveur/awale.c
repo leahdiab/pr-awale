@@ -2,6 +2,7 @@
 
 #include "awale.h"
 
+/* Mise en place du plateau et fonctions de base des regles. */
 void demarrer_partie(int board[12], int points[2])
 {
    for(int i = 0; i < 12; i++)
@@ -12,6 +13,7 @@ void demarrer_partie(int board[12], int points[2])
    points[1] = 0;
 }
 
+/* Ces tests servent a determiner le camp et les cases a nourrir ou capturer. */
 static int is_player_pit(int pit, int player)
 {
    return player == 1 ? pit < 6 : pit >= 6;
@@ -59,6 +61,7 @@ void awale_afficher_etat_jeu(const int board[12], const int points[2], int curre
    printf("Joueur courant : %d\n", current_player);
 }
 
+/* Joue un coup legal, seme les graines et applique les captures possibles. */
 bool make_move(int board[12], int points[2], int player, int pit)
 {
    int board_pit = 0;
@@ -130,6 +133,7 @@ bool make_move(int board[12], int points[2], int player, int pit)
    return true;
 }
 
+/* Verifie si la partie continue et collecte les graines lorsqu'elle s'arrete. */
 bool verif_end_game(int board[12], int points[2], int current_player)
 {
    int own_first_pit = 0;

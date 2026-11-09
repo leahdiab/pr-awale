@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+/* Etat d'un joueur connecte, conserve par le serveur. */
 typedef struct
 {
    SOCKET sock;
@@ -19,4 +20,4 @@ typedef struct
    size_t review_state_index;
 }Client;
 
-#endif /* guard */
+#endif

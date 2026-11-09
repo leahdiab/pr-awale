@@ -1,4 +1,0 @@
-GAME 1
-PLAYER1 lea
-PLAYER2 samia
-ENDGAME

@@ -6,7 +6,8 @@
 static int tests_run;
 static int tests_failed;
 
-static void verifier(bool condition, const char *description) // affiche le resultat d'un test et met a jour les compteurs
+/* Verification des regles et comptage des resultats. */
+static void verifier(bool condition, const char *description)
 {
    tests_run++;
    if(condition)
@@ -20,7 +21,7 @@ static void verifier(bool condition, const char *description) // affiche le resu
    }
 }
 
-static int total_graines(const int board[12], const int points[2]) // retourne le nombre total de graines sur le plateau et dans les points
+static int total_graines(const int board[12], const int points[2])
 {
    int total = points[0] + points[1];
    for(int i = 0; i < 12; i++)
@@ -30,7 +31,8 @@ static int total_graines(const int board[12], const int points[2]) // retourne l
    return total;
 }
 
-static void tester_initialisation_et_coups_invalides(void) // teste l'initialisation du plateau et le rejet des coups invalides
+/* Initialisation et validation des coups. */
+static void tester_initialisation_et_coups_invalides(void)
 {
    int board[12];
    int points[2];
@@ -65,7 +67,8 @@ static void tester_initialisation_et_coups_invalides(void) // teste l'initialisa
             "rejet d'une case vide sans modifier les points");
 }
 
-static void tester_coups_et_captures(void) // teste les coups simples, les captures et les interdictions de capture totale
+/* Semis et captures, dont l'interdiction de vider le camp adverse. */
+static void tester_coups_et_captures(void)
 {
    int board[12] = {0};
    int points[2] = {0, 0};
@@ -139,7 +142,8 @@ static void tester_coups_et_captures(void) // teste les coups simples, les captu
             "tour complet du plateau sans semer dans la case de depart");
 }
 
-static void tester_alimentation_et_fins_de_partie(void) // teste l'alimentation du camp adverse et les conditions de fin de partie
+/* Regle d'alimentation et conditions de fin de partie. */
+static void tester_alimentation_et_fins_de_partie(void)
 {
    int board[12] = {0};
    int points[2] = {0, 0};

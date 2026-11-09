@@ -6,40 +6,7 @@
 
 #include "client2.h"
 
-// void client_afficher_etat_jeu(const int board[12], const int points[2], int current_player, char* username)
-// {
-//    int i = 0;
-
-//    printf("\nPlateau :\n");
-//    printf("Joueur 2 : ");
-//    for(i = 11; i >= 6; i--)
-//    {
-//       printf("%2d ", board[i]);
-//    }
-//    printf("\n            ");
-//    for(i = 6; i >= 1; i--)
-//    {
-//       printf("%2d ", i);
-//    }
-
-//    printf("\nJoueur 1 : ");
-//    for(i = 0; i < 6; i++)
-//    {
-//       printf("%2d ", board[i]);
-//    }
-//    printf("\n            ");
-//    for(i = 1; i <= 6; i++)
-//    {
-//       printf("%2d ", i);
-//    }
-
-//    printf("\n\nScores : joueur 1 = %d, joueur 2 = %d\n", points[0], points[1]);
-//    if(current_player == 1 || current_player == 2)
-//    {
-//       printf("Au tour du joueur %s.\n", username);
-//    }
-// }
-
+/* Validation d'une case saisie au clavier. */
 int client_demander_coup(void)
 {
    char input[BUF_SIZE];
@@ -84,6 +51,7 @@ int client_demander_coup(void)
    }
 }
 
+/* Initialisation des sockets sous Windows. */
 static void init(void)
 {
 #ifdef WIN32
@@ -104,67 +72,7 @@ static void end(void)
 #endif
 }
 
-static void app(const char *address, const char *name)
-{
-   SOCKET sock = init_connection(address);
-   char buffer[BUF_SIZE];
-
-   fd_set rdfs;
-
-   /* send our name */
-   write_server(sock, name);
-
-   while(1)
-   {
-      FD_ZERO(&rdfs);
-
-      /* add STDIN_FILENO */
-      FD_SET(STDIN_FILENO, &rdfs);
-
-      /* add the socket */
-      FD_SET(sock, &rdfs);
-
-      if(select(sock + 1, &rdfs, NULL, NULL, NULL) == -1)
-      {
-         perror("select()");
-         exit(errno);
-      }
-
-      /* something from standard input : i.e keyboard */
-      if(FD_ISSET(STDIN_FILENO, &rdfs))
-      {
-         fgets(buffer, BUF_SIZE - 1, stdin);
-         {
-            char *p = NULL;
-            p = strstr(buffer, "\n");
-            if(p != NULL)
-            {
-               *p = 0;
-            }
-            else
-            {
-               /* fclean */
-               buffer[BUF_SIZE - 1] = 0;
-            }
-         }
-         write_server(sock, buffer);
-      }
-      else if(FD_ISSET(sock, &rdfs))
-      {
-         int n = read_server(sock, buffer);
-         /* server down */
-         if(n == 0)
-         {
-            printf("Server disconnected !\n");
-            break;
-         }
-         printf("%s\n\n", buffer);
-      }
-   }
-
-   end_connection(sock);
-}
-
+/* Connexion au serveur et fonctions de lecture/ecriture. */
 static int init_connection(const char *address)
 {
    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -224,6 +132,64 @@ static void write_server(SOCKET sock, const char *buffer)
       perror("send()");
       exit(errno);
    }
+}
+
+/* Boucle du client : transmission des commandes et affichage des reponses. */
+static void app(const char *address, const char *name)
+{
+   SOCKET sock = init_connection(address);
+   char buffer[BUF_SIZE];
+
+   fd_set rdfs;
+
+   write_server(sock, name);
+
+   while(1)
+   {
+      FD_ZERO(&rdfs);
+
+      FD_SET(STDIN_FILENO, &rdfs);
+
+      FD_SET(sock, &rdfs);
+
+      if(select(sock + 1, &rdfs, NULL, NULL, NULL) == -1)
+      {
+         perror("select()");
+         exit(errno);
+      }
+
+      if(FD_ISSET(STDIN_FILENO, &rdfs))
+      {
+         fgets(buffer, BUF_SIZE - 1, stdin);
+         {
+            char *p = NULL;
+            p = strstr(buffer, "\n");
+            if(p != NULL)
+            {
+               *p = 0;
+            }
+            else
+            {
+
+               buffer[BUF_SIZE - 1] = 0;
+            }
+         }
+         write_server(sock, buffer);
+      }
+      else if(FD_ISSET(sock, &rdfs))
+      {
+         int n = read_server(sock, buffer);
+
+         if(n == 0)
+         {
+            printf("Server disconnected !\n");
+            break;
+         }
+         printf("%s\n\n", buffer);
+      }
+   }
+
+   end_connection(sock);
 }
 
 int main(int argc, char **argv)

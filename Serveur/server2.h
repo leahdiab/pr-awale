@@ -11,8 +11,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <unistd.h> /* close */
-#include <netdb.h> /* gethostbyname */
+#include <unistd.h>
+#include <netdb.h>
 #include <sys/select.h>
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
@@ -37,6 +37,7 @@ typedef struct in_addr IN_ADDR;
 #include <stddef.h>
 #include "client2.h"
 
+/* Etats necessaires pour reprendre ou relire une partie. */
 typedef struct
 {
    int board[12];
@@ -44,6 +45,7 @@ typedef struct
    int current_player;
 } GameState;
 
+/* Etat complet d'une partie, y compris les reprises et spectateurs. */
 typedef struct
 {
    bool active;
@@ -79,4 +81,4 @@ static void remove_client(Client *clients, int to_remove, int *actual);
 static void clear_clients(Client *clients, int actual);
 void afficher_etat_jeu(const int board[12], const int points[2], int current_player);
 
-#endif /* guard */
+#endif

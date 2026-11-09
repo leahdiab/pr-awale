@@ -1,6 +1,8 @@
 #ifndef CLIENT_H
 #define CLIENT_H
 
+/* Configuration des sockets et interface de saisie du client. */
+
 #ifdef WIN32
 
 #include <winsock2.h>
@@ -11,8 +13,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <unistd.h> /* close */
-#include <netdb.h> /* gethostbyname */
+#include <unistd.h>
+#include <netdb.h>
 #define INVALID_SOCKET -1
 #define SOCKET_ERROR -1
 #define closesocket(s) close(s)
@@ -32,7 +34,6 @@ typedef struct in_addr IN_ADDR;
 
 #define BUF_SIZE 1024
 
-// void client_afficher_etat_jeu(const int board[12], const int points[2], int current_player, char* username);
 int client_demander_coup(void);
 
 static void init(void);
@@ -43,4 +44,4 @@ static void end_connection(int sock);
 static int read_server(SOCKET sock, char *buffer);
 static void write_server(SOCKET sock, const char *buffer);
 
-#endif /* guard */
+#endif
