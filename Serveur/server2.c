@@ -1214,7 +1214,7 @@ static void envoyer_liste_amis(const Client *client)
       {
          size_t used = strlen(message);
          int written = snprintf(message + used, sizeof message - used,
-                                "\nDemande de %s (repondre : ACCEPT FRIEND %s)",
+                                "\nDemande de %s (repondre : ACCEPT FRIEND ou REFUSE FRIEND %s)",
                                 request->sender, request->sender);
          if(written < 0 || (size_t)written >= sizeof message - used)
          {
@@ -1469,7 +1469,7 @@ static void partie_privee(SOCKET sock, Game *game)
 {
    game->privacy_pending = true;
    write_client(sock,
-                "Choisissez la visibilite de la partie : PRIVE ou PUBLIC.");
+                "Choisissez la visibilite de la partie : PRIVATE ou PUBLIC.");
 }
 
 static void afficher_commandes(SOCKET sock){
@@ -1488,6 +1488,7 @@ static void afficher_commandes(SOCKET sock){
       "END                          - Termine la partie\n"
       "LIST GAMES                   - Affiche les parties en cours\n"
       "WATCH numero                 - Regarde une partie\n"
+      "STOP WATCH                   - Arrete de regarder une partie\n"
       "LIST MY GAMES                - Affiche tes parties recuperables\n\n"
       "Communication et profil\n"
       "SEND PUBLIC message          - Envoie un message public\n"
@@ -2239,7 +2240,7 @@ static void app(void)
                         if(game->privacy_pending)
                         {
                            write_client(game->player1.sock,
-                                        "Choisissez la visibilite de la partie : PRIVE ou PUBLIC.");
+                                        "Choisissez la visibilite de la partie : PRIVATE ou PUBLIC.");
                            write_client(game->player2.sock,
                                         "Attendez que le createur choisisse la visibilite de la partie.");
                         }
@@ -2274,8 +2275,8 @@ static void app(void)
                   {
                      envoyer_liste_parties(games, client.sock);
                   }
-                  /* PRIVE/PUBLIC : choix de visibilite par le createur. */
-                  else if(strcmp(buffer, "PRIVE") == 0 ||
+                  /* PRIVATE/PUBLIC : choix de visibilite par le createur. */
+                  else if(strcmp(buffer, "PRIVATE") == 0 ||
                           strcmp(buffer, "PUBLIC") == 0)
                   {
                      int game_index = trouver_partie_par_socket(
@@ -2293,7 +2294,7 @@ static void app(void)
                      else
                      {
                         Game *game = &games[game_index];
-                        game->private_game = strcmp(buffer, "PRIVE") == 0;
+                        game->private_game = strcmp(buffer, "PRIVATE") == 0;
                         game->privacy_pending = false;
                         write_client(game->player1.sock, game->private_game
                            ? "La partie est privee : seuls vos amis ou ceux de votre adversaire peuvent la regarder."

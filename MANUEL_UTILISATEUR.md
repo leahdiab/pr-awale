@@ -110,7 +110,7 @@ Saisissez une commande puis appuyez sur Entree. Les commandes sont a envoyer dan
    ou :
 
    ```text
-   PRIVE
+   PRIVATE
    ```
 
    Le choix doit etre fait par le createur avant de jouer.
