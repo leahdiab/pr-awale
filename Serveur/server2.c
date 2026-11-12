@@ -1214,7 +1214,7 @@ static void envoyer_liste_amis(const Client *client)
       {
          size_t used = strlen(message);
          int written = snprintf(message + used, sizeof message - used,
-                                "\nDemande de %s (repondre : ACCEPT FRIEND ou REFUSE FRIEND %s)",
+                                "\nDemande de %s (ACCEPT/REFUSE FRIEND %s)",
                                 request->sender, request->sender);
          if(written < 0 || (size_t)written >= sizeof message - used)
          {
@@ -1482,6 +1482,8 @@ static void afficher_commandes(SOCKET sock){
       "CHALLENGE pseudo             - Invite un joueur a jouer\n"
       "LIST FRIENDS                 - Affiche tes amis et demandes\n"
       "ADD FRIEND pseudo            - Envoie une demande d'ami\n"
+      "ACCEPT FRIEND pseudo         - Accepte une demande d'ami\n"
+      "REFUSE FRIEND pseudo         - Refuse une demande d'ami\n"
       "REMOVE FRIEND pseudo         - Supprime un ami\n\n"
       "Parties\n"
       "MOVE numero                  - Joue un coup (1 a 6)\n"
@@ -1502,14 +1504,30 @@ static void afficher_commandes(SOCKET sock){
    write_client(sock, buffer);
 }
 
-static void ecrire_biographie( SOCKET sock, Client *clients, int actual, const char *bio){
+static void ajouter_texte_borne(char *message, size_t capacity, size_t *length,
+                                const char *text)
+{
+   size_t available = capacity - 1 - *length;
+   size_t text_length = strlen(text);
+   if(text_length > available)
+   {
+      text_length = available;
+   }
+   memcpy(message + *length, text, text_length);
+   *length += text_length;
+   message[*length] = '\0';
+}
+
+static void ecrire_biographie(SOCKET sock, const char *bio)
+{
    char message[BUF_SIZE];
    snprintf(message, sizeof message, "Biographie mise à jour : %s", bio);
    write_client(sock, message);
-
 }
 
-static void lire_biographie( SOCKET sock, Client *clients, int actual, const char *username){
+static void lire_biographie(SOCKET sock, Client *clients, int actual,
+                            const char *username)
+{
    int target_index = trouver_client_par_pseudo(clients, actual, username);
    if(target_index < 0)
    {
@@ -1518,10 +1536,15 @@ static void lire_biographie( SOCKET sock, Client *clients, int actual, const cha
    else
    {
       char message[BUF_SIZE];
-      snprintf(message, sizeof message, "%s : %s", clients[target_index].name, clients[target_index].bio);
+      size_t message_length = 0;
+      message[0] = '\0';
+      ajouter_texte_borne(message, sizeof message, &message_length,
+                          clients[target_index].name);
+      ajouter_texte_borne(message, sizeof message, &message_length, " : ");
+      ajouter_texte_borne(message, sizeof message, &message_length,
+                          clients[target_index].bio);
       write_client(sock, message);
    }
-
 }
 
 /* Fonctions reseau appelees par la boucle principale. */
@@ -1976,8 +1999,8 @@ static void app(void)
                      else
                      {
                         snprintf(buffer, sizeof buffer,
-                                 "%.450s vous demande en ami. Repondez : ACCEPT FRIEND %.450s",
-                                 client.name, client.name);
+                                 "%.300s vous demande en ami. Repondez : ACCEPT FRIEND %.300s ou REFUSE FRIEND %.300s",
+                                 client.name, client.name, client.name);
                         write_client(clients[target_index].sock, buffer);
                         write_client(client.sock, "Demande d'amitie envoyee.");
                      }
@@ -2605,7 +2628,14 @@ static void app(void)
                      }
                      else
                      {
-                        snprintf(message, sizeof message, "%s (prive) : %s", client.name, private_text);
+                        size_t message_length = 0;
+                        message[0] = '\0';
+                        ajouter_texte_borne(message, sizeof message, &message_length,
+                                            client.name);
+                        ajouter_texte_borne(message, sizeof message, &message_length,
+                                            " (prive) : ");
+                        ajouter_texte_borne(message, sizeof message, &message_length,
+                                            private_text);
                         write_client(clients[target_index].sock, message);
                      }
                   }
@@ -2626,7 +2656,7 @@ static void app(void)
                         write_client(client.sock, "Usage : WRITE BIO votre_biographie");
                         continue;
                      }
-                     ecrire_biographie(client.sock, clients, actual, bio_text);
+                     ecrire_biographie(client.sock, bio_text);
                      strncpy(clients[i].bio, bio_text, sizeof clients[i].bio - 1);
                   }
                   else if(strncmp(buffer, "READ BIO ", 9) == 0)
@@ -2672,6 +2702,9 @@ static void app(void)
 
 int main(int argc, char **argv)
 {
+   (void)argc;
+   (void)argv;
+
    srand((unsigned int)time(NULL));
 
    init();
